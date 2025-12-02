@@ -1,0 +1,30 @@
+name: student_workspace
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  # flutter sdk constraint is optional; you can include it or omit it. This is valid:
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.1.1
+  intl: ^0.17.0
+  flutter_svg: ^2.0.9
+  cached_network_image: ^3.2.3
+  fl_chart: ^0.65.0
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  
+
+flutter:
+  uses-material-design: true
+  assets:
+  - assets/images/placeholder.png
