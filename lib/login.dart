@@ -1,25 +1,12 @@
 // lib/login_page.dart
 import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
+import 'services/api_service.dart'; // Import the API service
 
 /// Global emerald color used throughout the page
 const Color kEmerald = Color(0xFF059669);
-
-/// Base URL of your Flask API
-/// IMPORTANT: Update this to match your Flask server
-/// - For Android emulator: http://10.0.2.2:5000
-/// - For iOS simulator: http://localhost:5000
-/// - For real device: http://YOUR_COMPUTER_IP:5000
-/// - For production: https://your-domain.com
-const String API_BASE = String.fromEnvironment(
-  'API_BASE',
-  defaultValue: 'http://10.0.2.2:5000',
-);
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -123,99 +110,50 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     final password = _passwordController.text;
 
     try {
-      // Call the login API
-      final response = await http.post(
-        Uri.parse('$API_BASE/api/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      ).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => throw TimeoutException('Request timed out'),
-      );
+      // Use ApiService for login
+      debugPrint('🔐 Attempting login via ApiService...');
+      final result = await ApiService.login(email, password);
 
       if (!mounted) return;
 
-      debugPrint('Login response status: ${response.statusCode}');
-      debugPrint('Login response body: ${response.body}');
-
-      // Parse response
-      Map<String, dynamic>? parsed;
-      try {
-        parsed = jsonDecode(response.body) as Map<String, dynamic>?;
-      } catch (e) {
-        debugPrint('Failed to parse response: $e');
-        _showError('Invalid response from server');
-        return;
-      }
+      debugPrint('Login result: $result');
 
       // Check if login was successful
-      if (response.statusCode == 200 && parsed != null) {
-        final success = parsed['success'] == true;
-        
-        if (success) {
-          // Save login state and user data
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('isLoggedIn', true);
-          await prefs.setString('userEmail', email);
-          
-          // Save or remove remembered email
-          if (_rememberMe) {
-            await prefs.setString('remembered_email', email);
-          } else {
-            await prefs.remove('remembered_email');
-          }
-          
-          // Save user information if available
-          final user = parsed['user'] as Map<String, dynamic>?;
-          if (user != null) {
-            await prefs.setString('userName', user['name'] ?? '');
-            await prefs.setString('userId', user['id']?.toString() ?? '');
-          }
-          
-          // Save token if provided
-          final token = parsed['token'] as String?;
-          if (token != null && token.isNotEmpty) {
-            await prefs.setString('apiToken', token);
-          }
-
-          // Save session cookie if present
-          final cookies = response.headers['set-cookie'];
-          if (cookies != null) {
-            await prefs.setString('sessionCookie', cookies);
-          }
-
-          _showSuccess('Login successful!');
-          
-          // Navigate to home/dashboard
-          await Future.delayed(const Duration(milliseconds: 500));
-          if (!mounted) return;
-          
-         // Navigate to the root scaffold (clears navigation stack)
-await Future.delayed(const Duration(milliseconds: 500));
-if (!mounted) return;
-
-// If your root scaffold is registered as route '/', this will replace the entire
-// navigation stack so user can't go back to login:
-Navigator.pushNamedAndRemoveUntil(context, '/home', (Route<dynamic> route) => false);
-
-// --- OR ---
-// If you prefer to navigate directly to a widget (e.g. RootScaffold()), use:
-// Navigator.pushAndRemoveUntil(
-//   context,
-//   MaterialPageRoute(builder: (_) => const RootScaffold()),
-//   (Route<dynamic> route) => false,
-// );
-
+      if (result['success'] == true) {
+        // Save or remove remembered email
+        final prefs = await SharedPreferences.getInstance();
+        if (_rememberMe) {
+          await prefs.setString('remembered_email', email);
         } else {
-          final message = parsed['message'] ?? 'Login failed';
-          _showError(message);
+          await prefs.remove('remembered_email');
         }
+        
+        // Save additional user data if needed
+        await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('userEmail', email);
+        
+        final user = result['user'] as Map<String, dynamic>?;
+        if (user != null) {
+          await prefs.setString('userName', user['name'] ?? '');
+          await prefs.setString('userId', user['id']?.toString() ?? '');
+          await prefs.setString('userRole', user['role'] ?? 'user');
+        }
+
+        _showSuccess('Login successful!');
+        
+        // Small delay for user feedback
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+        
+        // Navigate to home (clears navigation stack)
+        Navigator.pushNamedAndRemoveUntil(
+          context, 
+          '/home', 
+          (Route<dynamic> route) => false
+        );
+
       } else {
-        // Handle error responses
-        final message = parsed?['message'] ?? 'Login failed. Please try again.';
+        final message = result['message'] ?? 'Login failed';
         _showError(message);
       }
     } on TimeoutException catch (_) {

@@ -1,12 +1,10 @@
-// lib/admin/budget_dashboard.dart
+// lib/admin/budget_dashboard.dart - Combined & cleaned version
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/api_service.dart';
 
-bool _isLoading = false;
-
 class BudgetPage extends StatefulWidget {
-  const BudgetPage({Key? key}) : super(key: key);
+  const BudgetPage({super.key});
 
   @override
   State<BudgetPage> createState() => _BudgetPageState();
@@ -76,74 +74,38 @@ class TicketSale {
 }
 
 class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateMixin {
-  List<Category> categories = [
-    Category(id: '1', name: 'Costume', budget: 3000),
-    Category(id: '2', name: 'Equipment', budget: 5000),
-    Category(id: '3', name: 'General', budget: 5000),
-  ];
-
-  List<TransactionModel> transactions = [
-    TransactionModel(id: 't1', description: 'Cash', category: 'General', amount: 1000, type: 'expense', date: DateTime.now().subtract(const Duration(days: 1))),
-    TransactionModel(id: 't2', description: 'GCash', category: 'General', amount: 5000, type: 'income', date: DateTime.now().subtract(const Duration(days: 2))),
-    TransactionModel(id: 't3', description: 'Cash', category: 'Equipment', amount: 5000, type: 'expense', date: DateTime.now().subtract(const Duration(days: 3))),
-    TransactionModel(id: 't4', description: 'Snack Sales', category: 'General', amount: 200, type: 'income', date: DateTime.now().subtract(const Duration(days: 4))),
-    TransactionModel(id: 't5', description: 'Props', category: 'Costume', amount: 800, type: 'expense', date: DateTime.now().subtract(const Duration(days: 5))),
-  ];
-
-  List<TicketEvent> tickets = [
-    TicketEvent(
-      id: 'e1',
-      event: 'Play Night',
-      totalTickets: 200,
-      price: 150.0,
-      sales: [
-        TicketSale(buyer: 'Alice', qty: 2, date: DateTime.now().subtract(const Duration(days: 2))),
-        TicketSale(buyer: 'Bob', qty: 1, date: DateTime.now().subtract(const Duration(days: 1))),
-        TicketSale(buyer: 'Charlie', qty: 3, date: DateTime.now().subtract(const Duration(days: 3))),
-      ],
-    ),
-    TicketEvent(
-      id: 'e2',
-      event: 'Matinee',
-      totalTickets: 120,
-      price: 120.0,
-      sales: [
-        TicketSale(buyer: 'Dana', qty: 1, date: DateTime.now().subtract(const Duration(days: 4))),
-      ],
-    ),
-  ];
+  List<Category> categories = [];
+  List<TransactionModel> transactions = [];
+  List<TicketEvent> tickets = [];
 
   late TabController _tabController;
   final Map<String, TextEditingController> _budgetControllers = {};
 
-  // show-more states per section
   bool _showMoreOverview = false;
   bool _showMoreCategories = false;
   bool _showMoreTransactions = false;
   bool _showMoreTickets = false;
+  bool _isLoading = false;
 
-  // user-provided two-tone emerald gradient
-  static const Color emeraldStart = Color(0xFF10B981); // #10B981
-  static const Color emeraldEnd = Color(0xFF059669); // #059669
+  static const Color emeraldStart = Color(0xFF10B981);
+  static const Color emeraldEnd = Color(0xFF059669);
   static const Color accentPurple = Color(0xFF7C3AED);
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    // add listener so IndexedStack updates when TabBar changes index
     _tabController.addListener(() {
-      if (mounted) setState(() {}); // rebuild to show the appropriate IndexedStack child
+      if (mounted) setState(() {});
     });
-
-    for (var c in categories) {
-      _budgetControllers[c.id] = TextEditingController(text: c.budget.toStringAsFixed(0));
-    }
+    _loadBudgetData();
   }
 
   @override
   void dispose() {
-    for (var ctl in _budgetControllers.values) ctl.dispose();
+    for (var ctl in _budgetControllers.values) {
+      ctl.dispose();
+    }
     _tabController.dispose();
     super.dispose();
   }
@@ -164,7 +126,9 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
 
   Map<String, double> spentByCategory() {
     final map = <String, double>{};
-    for (var c in categories) map[c.name] = 0.0;
+    for (var c in categories) {
+      map[c.name] = 0.0;
+    }
     for (var t in transactions) {
       if (t.type == 'expense' && map.containsKey(t.category)) {
         map[t.category] = map[t.category]! + t.amount;
@@ -173,9 +137,91 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
     return map;
   }
 
-  // --------------------------
-  // Button style updated to match Meetings page: gradient emerald pill with subtle shadow
-  // --------------------------
+  Future<void> _loadBudgetData() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final data = await ApiService.getBudgetData();
+
+      if (!mounted) return;
+
+      setState(() {
+        categories = (data['categories'] as List).map((c) =>
+            Category(
+              id: c['id'].toString(),
+              name: c['name'],
+              budget: (c['budget'] as num).toDouble(),
+            )
+        ).toList();
+
+        transactions = (data['transactions'] as List).map((t) =>
+            TransactionModel(
+              id: t['id'].toString(),
+              description: t['description'],
+              category: t['category'],
+              amount: (t['amount'] as num).toDouble(),
+              type: t['type'],
+              date: DateTime.parse(t['date']),
+            )
+        ).toList();
+
+        tickets = (data['tickets'] as List).map((ticket) =>
+            TicketEvent(
+              id: ticket['id'].toString(),
+              event: ticket['event'],
+              totalTickets: ticket['total_tickets'],
+              price: (ticket['price'] as num).toDouble(),
+              sales: (ticket['sales'] as List).map((s) =>
+                  TicketSale(
+                    buyer: s['buyer'],
+                    qty: s['qty'],
+                    date: DateTime.parse(s['date']),
+                  )
+              ).toList(),
+            )
+        ).toList();
+
+        for (var c in categories) {
+          _budgetControllers[c.id] = TextEditingController(text: c.budget.toStringAsFixed(0));
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading budget: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _createTransaction(TransactionModel transaction) async {
+    try {
+      final result = await ApiService.createTransaction(
+        type: transaction.type,
+        category: transaction.category,
+        description: transaction.description,
+        amount: transaction.amount,
+        date: transaction.date.toIso8601String(),
+      );
+
+      if (result['success'] == true) {
+        await _loadBudgetData();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transaction recorded')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
   Widget _gradientButton({required Widget child, required VoidCallback onPressed, EdgeInsets? padding, BorderRadius? borderRadius}) {
     final br = borderRadius ?? BorderRadius.circular(999);
     return Material(
@@ -199,7 +245,6 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
   }
 
   Widget _gradientButtonIcon({required IconData icon, required String label, required VoidCallback onPressed, EdgeInsets? padding}) {
-    // Pill with icon on left (compact), matches meetings "Add Meeting" pill
     return _gradientButton(
       onPressed: onPressed,
       padding: padding ?? const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -214,13 +259,10 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
     );
   }
 
-  // Use for text-only actions (matching emerald color)
   ButtonStyle _textButtonStyle() {
     return TextButton.styleFrom(foregroundColor: emeraldEnd);
   }
 
-  // A pill-style gradient floating action (same look as meetings' pill)
-  // We'll use this as Scaffold.floatingActionButton
   Widget _gradientPillFab({required VoidCallback onPressed, required IconData icon, required String label, double height = 44}) {
     final BorderRadius br = BorderRadius.circular(28);
     return Material(
@@ -250,86 +292,7 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
       ),
     );
   }
-Future<void> loadBudgetData() async {
-  setState(() => _isLoading = true);
-  
-  try {
-    final data = await ApiService.getBudgetData();
-    
-    setState(() {
-      categories = (data['categories'] as List).map((c) =>
-        Category(
-          id: c['id'].toString(),
-          name: c['name'],
-          budget: (c['budget'] as num).toDouble(),
-        )
-      ).toList();
-      
-      transactions = (data['transactions'] as List).map((t) =>
-        TransactionModel(
-          id: t['id'].toString(),
-          description: t['description'],
-          category: t['category'],
-          amount: (t['amount'] as num).toDouble(),
-          type: t['type'],
-          date: DateTime.parse(t['date']),
-        )
-      ).toList();
-      
-      tickets = (data['tickets'] as List).map((ticket) =>
-        TicketEvent(
-          id: ticket['id'].toString(),
-          event: ticket['event'],
-          totalTickets: ticket['totalTickets'],
-          price: (ticket['price'] as num).toDouble(),
-          sales: (ticket['sales'] as List).map((s) =>
-            TicketSale(
-              buyer: s['buyer'],
-              qty: s['qty'],
-              date: DateTime.parse(s['date']),
-            )
-          ).toList(),
-        )
-      ).toList();
-    });
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error loading budget: $e')),
-    );
-  } finally {
-    setState(() => _isLoading = false);
-  }
-}
 
-Future<void> createTransaction(TransactionModel transaction) async {
-  try {
-    final result = await ApiService.createTransaction(
-      type: transaction.type,
-      category: transaction.category,
-      description: transaction.description,
-      amount: transaction.amount,
-      date: transaction.date.toIso8601String(),
-    );
-
-    if (result['success'] == true) {
-      await loadBudgetData();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Transaction recorded')),
-      );
-    }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error: $e')),
-    );
-  }
-}
-
-
-  // --------------------------------
-
-  // UPDATED: restyled transaction dialog to match the Meetings/Calendar form.
-  // Uses a bottom sheet with rounded top, filled inputs, green Save pill with white text.
-  // FIXED: make sheet wrap to content so Save is visible without scrolling up first.
   void _openAddTransactionDialog() {
     final descCtl = TextEditingController();
     final amountCtl = TextEditingController();
@@ -344,7 +307,6 @@ Future<void> createTransaction(TransactionModel transaction) async {
       builder: (sheetContext) {
         final mq = MediaQuery.of(sheetContext);
         return Padding(
-          // keep keyboard padding so sheet moves above keyboard when it appears
           padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(
@@ -352,17 +314,14 @@ Future<void> createTransaction(TransactionModel transaction) async {
               borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, -6))],
             ),
-            // Using SingleChildScrollView + Column(mainAxisSize: MainAxisSize.min) wrapped in Padding
-            // ensures the sheet sizes to its content so Save is visible without an initial scroll.
             child: SingleChildScrollView(
               physics: const ClampingScrollPhysics(),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: StatefulBuilder(builder: (contextSB, setStateSB) {
                   return Column(
-                    mainAxisSize: MainAxisSize.min, // <- key: wrap to content
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // header: title centered + circular green close button
                       Row(
                         children: [
                           const SizedBox(width: 8),
@@ -385,10 +344,7 @@ Future<void> createTransaction(TransactionModel transaction) async {
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Description - filled style
                       TextField(
                         controller: descCtl,
                         decoration: InputDecoration(
@@ -399,10 +355,7 @@ Future<void> createTransaction(TransactionModel transaction) async {
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                         ),
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Type dropdown (filled)
                       DropdownButtonFormField<String>(
                         value: type,
                         isExpanded: true,
@@ -418,10 +371,7 @@ Future<void> createTransaction(TransactionModel transaction) async {
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                         ),
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Category dropdown (filled)
                       DropdownButtonFormField<String>(
                         value: category,
                         isExpanded: true,
@@ -435,10 +385,7 @@ Future<void> createTransaction(TransactionModel transaction) async {
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                         ),
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Amount - filled
                       TextField(
                         controller: amountCtl,
                         decoration: InputDecoration(
@@ -450,10 +397,7 @@ Future<void> createTransaction(TransactionModel transaction) async {
                         ),
                         keyboardType: TextInputType.number,
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Date row (text with emerald link)
                       Row(
                         children: [
                           const Text('Date: '),
@@ -463,26 +407,22 @@ Future<void> createTransaction(TransactionModel transaction) async {
                               final picked = await showDatePicker(context: contextSB, initialDate: date, firstDate: DateTime(2000), lastDate: DateTime(2100));
                               if (picked != null) setStateSB(() => date = picked);
                             },
-                            child: Text('${date.toIso8601String().substring(0, 10)}'),
+                            child: Text(date.toIso8601String().substring(0, 10)),
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 6),
                       const Text('(Receipt upload not implemented in this demo)', style: TextStyle(fontSize: 12, color: Colors.grey)),
                       const SizedBox(height: 16),
-
-                      // Actions: Cancel (text) + Save (emerald pill with white text)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(sheetContext),
-                            child: const Text('Cancel'),
                             style: _textButtonStyle(),
+                            child: const Text('Cancel'),
                           ),
                           const SizedBox(width: 8),
-                          // Save as gradient pill. _gradientButton ensures white text by default.
                           _gradientButton(
                             onPressed: () {
                               final amt = double.tryParse(amountCtl.text) ?? 0.0;
@@ -501,13 +441,12 @@ Future<void> createTransaction(TransactionModel transaction) async {
                               });
                               Navigator.pop(sheetContext);
                             },
-                            child: const Text('Save'),
                             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                             borderRadius: BorderRadius.circular(12),
+                            child: const Text('Save'),
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 12),
                     ],
                   );
@@ -544,21 +483,24 @@ Future<void> createTransaction(TransactionModel transaction) async {
               TextButton(onPressed: () => Navigator.pop(ctx), style: _textButtonStyle(), child: const Text('Cancel')),
               Padding(
                 padding: const EdgeInsets.only(right: 8.0),
-                child: _gradientButton(onPressed: () {
-                  final name = nameCtl.text.isEmpty ? 'Event' : nameCtl.text;
-                  final price = double.tryParse(priceCtl.text) ?? 0.0;
-                  final total = int.tryParse(ticketsCtl.text) ?? 0;
-                  setState(() {
-                    if (edit != null) {
-                      edit.event = name;
-                      edit.price = price;
-                      edit.totalTickets = total;
-                    } else {
-                      tickets.add(TicketEvent(id: UniqueKey().toString(), event: name, totalTickets: total, price: price, sales: []));
-                    }
-                  });
-                  Navigator.pop(ctx);
-                }, child: const Text('Save')),
+                child: _gradientButton(
+                  onPressed: () {
+                    final name = nameCtl.text.isEmpty ? 'Event' : nameCtl.text;
+                    final price = double.tryParse(priceCtl.text) ?? 0.0;
+                    final total = int.tryParse(ticketsCtl.text) ?? 0;
+                    setState(() {
+                      if (edit != null) {
+                        edit.event = name;
+                        edit.price = price;
+                        edit.totalTickets = total;
+                      } else {
+                        tickets.add(TicketEvent(id: UniqueKey().toString(), event: name, totalTickets: total, price: price, sales: []));
+                      }
+                    });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Save'),
+                ),
               ),
             ],
           );
@@ -582,29 +524,35 @@ Future<void> createTransaction(TransactionModel transaction) async {
                 const SizedBox(height: 8),
                 TextField(controller: qtyCtl, decoration: const InputDecoration(labelText: 'Quantity'), keyboardType: TextInputType.number),
                 const SizedBox(height: 8),
-                Row(children: [
-                  const Text('Date: '),
-                  TextButton(
+                Row(
+                  children: [
+                    const Text('Date: '),
+                    TextButton(
                       style: _textButtonStyle(),
                       onPressed: () async {
                         final picked = await showDatePicker(context: context, initialDate: date, firstDate: DateTime(2000), lastDate: DateTime(2100));
                         if (picked != null) setState(() => date = picked);
                       },
-                      child: Text('${date.toIso8601String().substring(0, 10)}'))
-                ])
+                      child: Text(date.toIso8601String().substring(0, 10)),
+                    )
+                  ],
+                )
               ],
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), style: _textButtonStyle(), child: const Text('Cancel')),
               Padding(
                 padding: const EdgeInsets.only(right: 8.0),
-                child: _gradientButton(onPressed: () {
-                  final qty = int.tryParse(qtyCtl.text) ?? 1;
-                  setState(() {
-                    ev.sales.add(TicketSale(buyer: buyerCtl.text.isEmpty ? 'Buyer' : buyerCtl.text, qty: qty, date: date));
-                  });
-                  Navigator.pop(ctx);
-                }, child: const Text('Save')),
+                child: _gradientButton(
+                  onPressed: () {
+                    final qty = int.tryParse(qtyCtl.text) ?? 1;
+                    setState(() {
+                      ev.sales.add(TicketSale(buyer: buyerCtl.text.isEmpty ? 'Buyer' : buyerCtl.text, qty: qty, date: date));
+                    });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Save'),
+                ),
               ),
             ],
           );
@@ -642,13 +590,19 @@ Future<void> createTransaction(TransactionModel transaction) async {
     void addMonthValue(String date, double amount, List<double> target) {
       final key = date.substring(0, 7);
       final idx = months.indexOf(key);
-      if (idx >= 0) target[idx] += amount;
+      if (idx >= 0) {
+        target[idx] += amount;
+      }
     }
 
     for (var t in transactions) {
       final key = t.date.toIso8601String().substring(0, 7);
-      if (t.type == 'income') addMonthValue(key, t.amount, income);
-      if (t.type == 'expense') addMonthValue(key, t.amount, expense);
+      if (t.type == 'income') {
+        addMonthValue(key, t.amount, income);
+      }
+      if (t.type == 'expense') {
+        addMonthValue(key, t.amount, expense);
+      }
     }
 
     return BarChartData(
@@ -657,7 +611,7 @@ Future<void> createTransaction(TransactionModel transaction) async {
         return BarChartGroupData(
           x: i,
           barRods: [
-            BarChartRodData(toY: income[i], width: 8),
+            BarChartRodData(toY: income[i], width: 8, color: emeraldEnd),
             BarChartRodData(toY: expense[i], width: 8, color: Colors.redAccent),
           ],
         );
@@ -671,12 +625,17 @@ Future<void> createTransaction(TransactionModel transaction) async {
               final idx = value.toInt();
               if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
               final label = months[idx].substring(5);
-              return SideTitleWidget(axisSide: meta.axisSide, child: Text(label, style: const TextStyle(fontSize: 10)));
+              return SideTitleWidget(
+              meta: meta,
+              child: Text(label, style: const TextStyle(fontSize: 10)),
+            );
             },
           ),
         ),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
-      gridData: FlGridData(show: true),
+      gridData: const FlGridData(show: true),
       borderData: FlBorderData(show: false),
     );
   }
@@ -687,9 +646,11 @@ Future<void> createTransaction(TransactionModel transaction) async {
   }
 
   BoxDecoration _panelDecoration() {
-    return BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: const [
-      BoxShadow(color: Colors.black12, blurRadius: 18, offset: Offset(0, 8))
-    ]);
+    return BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 18, offset: Offset(0, 8))],
+    );
   }
 
   Widget _panelTitle(String title) {
@@ -710,11 +671,14 @@ Future<void> createTransaction(TransactionModel transaction) async {
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [BoxShadow(color: Color(0x11000000), blurRadius: 6, offset: Offset(0, 3))],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        ],
+      ),
     );
   }
 
@@ -734,16 +698,20 @@ Future<void> createTransaction(TransactionModel transaction) async {
               child: TextFormField(
                 controller: ctl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12)),
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                ),
               ),
             ),
-            // Update -> emerald pill now
-            _gradientButton(onPressed: () {
-              setState(() {
-                c.budget = double.tryParse(ctl.text) ?? c.budget;
-              });
-            }, child: const Text('Update')),
-            // Delete (destructive) keep red
+            _gradientButton(
+              onPressed: () {
+                setState(() {
+                  c.budget = double.tryParse(ctl.text) ?? c.budget;
+                });
+              },
+              child: const Text('Update'),
+            ),
             OutlinedButton(
               onPressed: () {
                 setState(() {
@@ -751,8 +719,12 @@ Future<void> createTransaction(TransactionModel transaction) async {
                   _budgetControllers.remove(c.id)?.dispose();
                 });
               },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
               child: const Text('Delete'),
-              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12), foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -765,7 +737,11 @@ Future<void> createTransaction(TransactionModel transaction) async {
 
       if (isNarrow) {
         return Container(
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey[200]!),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 14.0),
             child: Column(
@@ -779,28 +755,40 @@ Future<void> createTransaction(TransactionModel transaction) async {
                 const SizedBox(height: 10),
                 Text('${(ratio * 100).toStringAsFixed(1)}% of budget used', style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 10),
-                LinearProgressIndicator(value: ratio, minHeight: 10),
+                LinearProgressIndicator(value: ratio, minHeight: 10, backgroundColor: Colors.grey[200], color: emeraldEnd),
               ],
             ),
           ),
         );
       }
 
+      // Wide layout
       return Container(
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 14.0),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  Text('Set monthly budget', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-                ]),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text('Set monthly budget', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                    const SizedBox(height: 10),
+                    Text('${(ratio * 100).toStringAsFixed(1)}% of budget used', style: const TextStyle(color: Colors.grey)),
+                    const SizedBox(height: 10),
+                    LinearProgressIndicator(value: ratio, minHeight: 10, backgroundColor: Colors.grey[200], color: emeraldEnd),
+                  ],
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 16),
               controls,
             ],
           ),
@@ -809,567 +797,492 @@ Future<void> createTransaction(TransactionModel transaction) async {
     });
   }
 
-  Widget _transactionRow(TransactionModel t) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Row(children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t.description, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            Text('${t.category} • ${t.date.toIso8601String().substring(0, 10)}', style: const TextStyle(color: Colors.grey)),
-          ])
-        ]),
-        Row(children: [
-          Text(
-            (t.type == 'expense' ? '- ' : '') + '₱${t.amount.toStringAsFixed(2)}',
-            style: TextStyle(fontWeight: FontWeight.bold, color: t.type == 'expense' ? Colors.red : Colors.green),
-          ),
-          const SizedBox(width: 8),
-          // Delete transaction -> red outlined
-          OutlinedButton(
-            onPressed: () => setState(() => transactions.removeWhere((x) => x.id == t.id)),
-            child: const Text('Delete'),
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
-          )
-        ])
-      ]),
-    );
-  }
+  void _openAddCategoryDialog() {
+    final nameCtl = TextEditingController();
+    final budgetCtl = TextEditingController(text: '1000');
 
-  Widget _ticketStatTileSimple(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
-      decoration: BoxDecoration(color: const Color(0xFFF7F5FF), borderRadius: BorderRadius.circular(12)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 13, color: Colors.grey[700], fontWeight: FontWeight.w600)),
-        const SizedBox(height: 10),
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      ]),
-    );
-  }
-
-  // aesthetic "Show more" pill styled to match emerald gradient & soft shadow
-  Widget _showMorePill({required bool expanded, required VoidCallback onTap}) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
-              borderRadius: BorderRadius.circular(999),
-              boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 6))],
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(_tabController.index == 0 ? (_showMoreOverview ? Icons.expand_less : Icons.expand_more) : Icons.expand_more, size: 18, color: Colors.white),
-              const SizedBox(width: 8),
-              Text(
-                expanded ? 'Show less' : 'Show more',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Add Category'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtl,
+                decoration: const InputDecoration(labelText: 'Category Name'),
               ),
-            ]),
+              const SizedBox(height: 12),
+              TextField(
+                controller: budgetCtl,
+                decoration: const InputDecoration(labelText: 'Monthly Budget (₱)'),
+                keyboardType: TextInputType.number,
+              ),
+            ],
           ),
-        ),
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: _textButtonStyle(),
+              child: const Text('Cancel'),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: _gradientButton(
+                onPressed: () {
+                  final name = nameCtl.text.trim();
+                  if (name.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Category name is required')),
+                    );
+                    return;
+                  }
+
+                  final budget = double.tryParse(budgetCtl.text) ?? 0.0;
+                  setState(() {
+                    categories.add(Category(
+                      id: UniqueKey().toString(),
+                      name: name,
+                      budget: budget,
+                    ));
+                  });
+                  Navigator.pop(ctx);
+                },
+                child: const Text('Add'),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final pieSections = _buildPieSections();
-    final media = MediaQuery.of(context);
-
-    // compact limits
-    const overviewCategoryLimit = 2;
-    const overviewTransactionsLimit = 3;
-    const categoriesLimit = 3;
-    const transactionsLimit = 4;
-    const ticketsLimit = 1;
-    const recentSalesLimit = 4;
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF6F7FB),
       appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black), onPressed: () => Navigator.of(context).maybePop()),
+        title: const Text('Budget Management', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
-      ),
-      body: SafeArea(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: (_) {},
-          onHorizontalDragUpdate: (_) {},
-          onHorizontalDragEnd: (_) {},
-          child: SingleChildScrollView(
-            physics: const ClampingScrollPhysics(),
-            padding: const EdgeInsets.all(18.0),
-            child: Column(
-              children: [
-                // TOP CARD
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: _panelDecoration(),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: const [
-                      Expanded(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Budget & Ticketing', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                          SizedBox(height: 6),
-                          Text('Manage budgets, transactions, and event revenue', style: TextStyle(color: Colors.grey)),
-                        ]),
-                      ),
-                    ]),
-                    const SizedBox(height: 14),
-
-                    // action column
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Add Transaction -> emerald pill matching meetings
-                            _gradientButtonIcon(icon: Icons.add, label: 'Add Transaction', onPressed: _openAddTransactionDialog),
-                            const SizedBox(height: 10),
-                            // NOTE: Export JSON removed
-                          ],
-                        ),
-
-                        const SizedBox(width: 12),
-
-                        // Add Event -> emerald pill matching meetings
-                        _gradientButtonIcon(icon: Icons.event, label: 'Add Event', onPressed: () => _openAddEventDialog()),
-
-                        const Spacer(),
-                      ],
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    LayoutBuilder(builder: (context, constraints) {
-                      if (constraints.maxWidth >= 520) {
-                        return Row(
-                          children: [
-                            Expanded(child: _statPill('Available Balance', '₱${balance.toStringAsFixed(2)}')),
-                            const SizedBox(width: 12),
-                            Expanded(child: _statPill('Total Expenses', '₱${totalExpenses.toStringAsFixed(2)}')),
-                            const SizedBox(width: 12),
-                            Expanded(child: _statPill('Savings Rate', '${savingsRate.toStringAsFixed(1)}%')),
-                            const SizedBox(width: 12),
-                            Expanded(child: _statPill('Ticket Revenue', '₱${ticketRevenue.toStringAsFixed(2)}')),
-                          ],
-                        );
-                      }
-
-                      return Column(children: [
-                        Row(children: [
-                          Expanded(child: _statPill('Available Balance', '₱${balance.toStringAsFixed(2)}')),
-                          const SizedBox(width: 12),
-                          Expanded(child: _statPill('Total Expenses', '₱${totalExpenses.toStringAsFixed(2)}')),
-                        ]),
-                        const SizedBox(height: 12),
-                        Row(children: [
-                          Expanded(child: _statPill('Savings Rate', '${savingsRate.toStringAsFixed(1)}%')),
-                          const SizedBox(width: 12),
-                          Expanded(child: _statPill('Ticket Revenue', '₱${ticketRevenue.toStringAsFixed(2)}')),
-                        ]),
-                      ]);
-                    }),
-                  ]),
-                ),
-
-                const SizedBox(height: 14),
-
-                // Tabs
-                LayoutBuilder(builder: (context, tcon) {
-                  final w = tcon.maxWidth;
-                  double fontSize = 15;
-                  double verticalPadding = 10;
-                  double indicatorVPadding = 10;
-                  if (w < 360) {
-                    fontSize = 13;
-                    verticalPadding = 8;
-                    indicatorVPadding = 8;
-                  } else if (w < 420) {
-                    fontSize = 14;
-                    verticalPadding = 9;
-                    indicatorVPadding = 9;
-                  }
-
-                  return Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE5E7EB))),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: SizedBox(
-                        height: verticalPadding * 3 + fontSize,
-                        child: TabBar(
-                          controller: _tabController,
-                          isScrollable: false,
-                          indicatorPadding: EdgeInsets.symmetric(horizontal: 8, vertical: indicatorVPadding),
-                          indicator: BoxDecoration(
-                            gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
-                            borderRadius: BorderRadius.circular(999),
-                            boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 6))],
-                          ),
-                          indicatorSize: TabBarIndicatorSize.tab,
-                          labelColor: Colors.white,
-                          unselectedLabelColor: emeraldEnd,
-                          labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: fontSize),
-                          unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: fontSize),
-                          labelPadding: const EdgeInsets.symmetric(horizontal: 10),
-                          tabs: const [
-                            Tab(child: FittedBox(child: Text('Overview'))),
-                            Tab(child: FittedBox(child: Text('Categories'))),
-                            Tab(child: FittedBox(child: Text('Transactions'))),
-                            Tab(child: FittedBox(child: Text('Ticketing Sales'))),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-
-                const SizedBox(height: 14),
-
-                // main content
-                LayoutBuilder(builder: (context, constraints) {
-                  final isWide = constraints.maxWidth >= 920;
-
-                  // LEFT: use IndexedStack to avoid unbounded height errors inside SingleChildScrollView
-                  final left = IndexedStack(
-                    index: _tabController.index,
-                    children: [
-                      // OVERVIEW — compact lists + "show more"
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeInOut,
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          _panelTitle('Budget & Expenses'),
-
-                          // categories (compact)
-                          ..._buildOverviewCategories(overviewCategoryLimit, _showMoreOverview),
-
-                          // show-more pill for overview categories if needed
-                          if (categories.length > overviewCategoryLimit)
-                            _showMorePill(
-                              expanded: _showMoreOverview,
-                              onTap: () => setState(() => _showMoreOverview = !_showMoreOverview),
-                            ),
-
-                          const SizedBox(height: 12),
-                          _panelTitle('Recent Transactions'),
-
-                          // transactions (compact)
-                          ..._buildOverviewTransactions(overviewTransactionsLimit, _showMoreOverview),
-
-                          if (transactions.length > overviewTransactionsLimit && !_showMoreOverview)
-                            _showMorePill(
-                              expanded: _showMoreOverview,
-                              onTap: () => setState(() => _showMoreOverview = !_showMoreOverview),
-                            ),
-                        ]),
-                      ),
-
-                      // CATEGORIES tab
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeInOut,
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          _panelTitle('Manage Categories'),
-                          Container(
-                              decoration: _panelDecoration(),
-                              padding: const EdgeInsets.all(12),
-                              child: Column(children: [
-                                ..._buildCategoryList(categoriesLimit, _showMoreCategories),
-                              ])),
-                          if (categories.length > categoriesLimit)
-                            _showMorePill(
-                              expanded: _showMoreCategories,
-                              onTap: () => setState(() => _showMoreCategories = !_showMoreCategories),
-                            ),
-                          const SizedBox(height: 12),
-                          Row(children: [
-                            Expanded(
-                              child: TextFormField(
-                                decoration: const InputDecoration(labelText: 'New Category', border: OutlineInputBorder()),
-                                onFieldSubmitted: (v) {
-                                  if (v.trim().isEmpty) return;
-                                  setState(() {
-                                    final newC = Category(id: UniqueKey().toString(), name: v.trim(), budget: 0);
-                                    categories.add(newC);
-                                    _budgetControllers[newC.id] = TextEditingController(text: '0');
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            SizedBox(width: 120, child: TextFormField(decoration: const InputDecoration(labelText: 'Budget', border: OutlineInputBorder()), keyboardType: TextInputType.number, onFieldSubmitted: (v) {})),
-                            const SizedBox(width: 10),
-                            _gradientButton(onPressed: () {
-                              setState(() {
-                                final newC = Category(id: UniqueKey().toString(), name: 'New Category', budget: 0);
-                                categories.add(newC);
-                                _budgetControllers[newC.id] = TextEditingController(text: '0');
-                              });
-                            }, child: const Text('Add Category')),
-                          ]),
-                          const SizedBox(height: 12),
-                        ]),
-                      ),
-
-                      // TRANSACTIONS tab
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeInOut,
-                        child: Column(children: [
-                          _panelTitle('All Transactions'),
-                          Container(
-                              decoration: _panelDecoration(),
-                              padding: const EdgeInsets.all(12),
-                              child: Column(children: [
-                                ..._buildTransactionsList(transactionsLimit, _showMoreTransactions),
-                              ])),
-                          if (transactions.length > transactionsLimit)
-                            _showMorePill(
-                              expanded: _showMoreTransactions,
-                              onTap: () => setState(() => _showMoreTransactions = !_showMoreTransactions),
-                            ),
-                        ]),
-                      ),
-
-                      // TICKETING tab — compact and show-more for events / recent sales
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeInOut,
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          _panelTitle('Ticketing Sales'),
-                          Container(
-                              decoration: _panelDecoration(),
-                              padding: const EdgeInsets.all(12),
-                              child: LayoutBuilder(builder: (context, constraints) {
-                                if (constraints.maxWidth >= 520) {
-                                  return Row(children: [
-                                    Expanded(child: _ticketStatTileSimple('Total Tickets', tickets.fold<int>(0, (s, e) => s + e.totalTickets).toString())),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: _ticketStatTileSimple('Tickets Sold', tickets.fold<int>(0, (s, e) => s + e.sales.fold<int>(0, (si, sale) => si + sale.qty)).toString())),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: _ticketStatTileSimple('Tickets Remaining', (tickets.fold<int>(0, (s, e) => s + e.totalTickets) - tickets.fold<int>(0, (s, e) => s + e.sales.fold<int>(0, (si, sale) => si + sale.qty))).toString())),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: _ticketStatTileSimple('Sales Revenue', '₱${ticketRevenue.toStringAsFixed(2)}')),
-                                  ]);
-                                } else {
-                                  return Wrap(spacing: 8, runSpacing: 8, children: [
-                                    SizedBox(width: (constraints.maxWidth - 8) / 2, child: _ticketStatTileSimple('Total Tickets', tickets.fold<int>(0, (s, e) => s + e.totalTickets).toString())),
-                                    SizedBox(width: (constraints.maxWidth - 8) / 2, child: _ticketStatTileSimple('Tickets Sold', tickets.fold<int>(0, (s, e) => s + e.sales.fold<int>(0, (si, sale) => si + sale.qty)).toString())),
-                                    SizedBox(width: (constraints.maxWidth - 8) / 2, child: _ticketStatTileSimple('Tickets Remaining', (tickets.fold<int>(0, (s, e) => s + e.totalTickets) - tickets.fold<int>(0, (s, e) => s + e.sales.fold<int>(0, (si, sale) => si + sale.qty))).toString())),
-                                    SizedBox(width: (constraints.maxWidth - 8) / 2, child: _ticketStatTileSimple('Sales Revenue', '₱${ticketRevenue.toStringAsFixed(2)}')),
-                                  ]);
-                                }
-                              })),
-                          const SizedBox(height: 12),
-
-                          // ticket events list (compact)
-                          ..._buildTicketEventsList(ticketsLimit, _showMoreTickets),
-
-                          if (tickets.length > ticketsLimit)
-                            _showMorePill(
-                              expanded: _showMoreTickets,
-                              onTap: () => setState(() => _showMoreTickets = !_showMoreTickets),
-                            ),
-
-                          const SizedBox(height: 12),
-                          _panelTitle('Recent Sales'),
-                          Container(decoration: _panelDecoration(), padding: const EdgeInsets.all(12), child: Column(children: [
-                            ..._buildRecentSalesList(recentSalesLimit, _showMoreTickets),
-                          ])),
-                        ]),
-                      ),
-                    ],
-                  );
-
-                  final charts = Column(children: [
-                    Container(width: double.infinity, decoration: _panelDecoration(), padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Expense Breakdown', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 12),
-                      SizedBox(height: 200, child: PieChart(PieChartData(sections: pieSections, sectionsSpace: 4, borderData: FlBorderData(show: false)))),
-                      const SizedBox(height: 12),
-                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: spentByCategory().entries.map((e) {
-                        return Padding(padding: const EdgeInsets.symmetric(vertical: 4.0), child: Row(children: [
-                          Container(width: 12, height: 12, decoration: BoxDecoration(color: _randomColorForKey(e.key), borderRadius: BorderRadius.circular(6))),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text('${e.key} — ₱${e.value.toStringAsFixed(2)}', style: const TextStyle(color: Colors.grey))),
-                        ]));
-                      }).toList())
-                    ])),
-                    const SizedBox(height: 12),
-                    Container(width: double.infinity, decoration: _panelDecoration(), padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Income vs Expense (Monthly)', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 12),
-                      SizedBox(height: 200, child: BarChart(_buildBarData(), swapAnimationDuration: const Duration(milliseconds: 350))),
-
-                    ]))
-                  ]);
-
-                  if (isWide) {
-                    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: left), const SizedBox(width: 14), SizedBox(width: 360, child: charts)]);
-                  } else {
-                    return Column(children: [left, const SizedBox(height: 14), charts]);
-                  }
-                }),
-                const SizedBox(height: 24),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2)),
+              ],
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: emeraldEnd,
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: emeraldEnd,
+              indicatorWeight: 3,
+              tabs: const [
+                Tab(text: 'Overview'),
+                Tab(text: 'Categories'),
+                Tab(text: 'Transactions'),
+                Tab(text: 'Tickets'),
               ],
             ),
           ),
         ),
       ),
-      // replace circular FAB with a pill-style gradient FAB like Meetings page
-      floatingActionButton: _gradientPillFab(onPressed: _openAddTransactionDialog, icon: Icons.add, label: 'Add Transaction'),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildOverviewTab(),
+          _buildCategoriesTab(),
+          _buildTransactionsTab(),
+          _buildTicketsTab(),
+        ],
+      ),
     );
   }
 
-  // helper builders that respect compact limits and "show more" flags
-  List<Widget> _buildOverviewCategories(int limit, bool expanded) {
-    final list = expanded ? categories : categories.take(limit).toList();
-    return list.map((c) {
-      final spent = spentByCategory()[c.name] ?? 0.0;
-      final ratio = c.budget > 0 ? (spent / c.budget).clamp(0.0, 1.0) : 0.0;
-      return Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: _categoryRow(c.name, spent, c.budget, ratio, c));
-    }).toList();
-  }
+  Widget _buildOverviewTab() {
+    final spent = spentByCategory();
+    final topCategories = spent.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final displayCategories = _showMoreOverview ? topCategories : topCategories.take(3).toList();
 
-  List<Widget> _buildOverviewTransactions(int limit, bool expanded) {
-    final list = expanded ? transactions : transactions.take(limit).toList();
-    return [
-      Container(decoration: _panelDecoration(), padding: const EdgeInsets.all(12), child: Column(children: list.take(6).map((t) => _transactionRow(t)).toList()))
-    ];
-  }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Stats Grid
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 2.2,
+            children: [
+              _statPill('Total Funds', '₱${totalFunds.toStringAsFixed(2)}'),
+              _statPill('Total Expenses', '₱${totalExpenses.toStringAsFixed(2)}'),
+              _statPill('Balance', '₱${balance.toStringAsFixed(2)}'),
+              _statPill('Ticket Revenue', '₱${ticketRevenue.toStringAsFixed(2)}'),
+            ],
+          ),
+          const SizedBox(height: 20),
 
-  List<Widget> _buildCategoryList(int limit, bool expanded) {
-    final list = expanded ? categories : categories.take(limit).toList();
-    return list.map((c) {
-      final spent = spentByCategory()[c.name] ?? 0.0;
-      final ratio = c.budget > 0 ? (spent / c.budget).clamp(0.0, 1.0) : 0.0;
-      return Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: _categoryRow(c.name, spent, c.budget, ratio, c));
-    }).toList();
-  }
-
-  List<Widget> _buildTransactionsList(int limit, bool expanded) {
-    final list = expanded ? transactions : transactions.take(limit).toList();
-    return list.map((t) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t.description, style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text('${t.category} • ${t.date.toIso8601String().substring(0, 10)}', style: const TextStyle(color: Colors.grey)),
-          ]),
-          Row(children: [
-            Text((t.type == 'expense' ? '- ' : '') + '₱${t.amount.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, color: t.type == 'expense' ? Colors.red : Colors.green)),
-            const SizedBox(width: 8),
-            OutlinedButton(
-              onPressed: () => setState(() => transactions.removeWhere((x) => x.id == t.id)),
-              child: const Text('Delete'),
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
-            )
-          ])
-        ]),
-      );
-    }).toList();
-  }
-
-  List<Widget> _buildTicketEventsList(int limit, bool expanded) {
-    final list = expanded ? tickets : tickets.take(limit).toList();
-
-    return list.map((ev) {
-      final sold = ev.sales.fold<int>(0, (a, b) => a + b.qty);
-      final remaining = (ev.totalTickets - sold).clamp(0, ev.totalTickets);
-
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        decoration: _panelDecoration(),
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Left: Event info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(ev.event, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 6),
-                  Text('${ev.totalTickets} tickets • ₱${ev.price.toStringAsFixed(2)}', style: TextStyle(color: Colors.grey[600])),
-                ],
-              ),
-            ),
-
-            const SizedBox(width: 12),
-
-            // Right: stats + actions
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          // Charts Section
+          Container(
+            decoration: _panelDecoration(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
               children: [
-                Text('$sold sold • $remaining left', style: TextStyle(color: Colors.grey[700])),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    _gradientButton(onPressed: () => _openAddEventDialog(ev), child: const Text('Edit')),
-                    _gradientButton(onPressed: () => _openRecordSaleDialog(ev), child: const Text('Record Sale')),
-                    OutlinedButton(
-                      onPressed: () => setState(() => tickets.removeWhere((x) => x.id == ev.id)),
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red), foregroundColor: Colors.red),
-                      child: const Text('Delete'),
+                _panelTitle('Spending by Category'),
+                if (spent.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(32.0),
+                    child: Text('No expense data yet', style: TextStyle(color: Colors.grey)),
+                  )
+                else
+                  SizedBox(
+                    height: 200,
+                    child: PieChart(
+                      PieChartData(
+                        sections: _buildPieSections(),
+                        sectionsSpace: 2,
+                        centerSpaceRadius: 40,
+                      ),
                     ),
-                  ],
-                )
+                  ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: spent.entries.map((e) {
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 16,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: _randomColorForKey(e.key),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(e.key, style: const TextStyle(fontSize: 12)),
+                      ],
+                    );
+                  }).toList(),
+                ),
               ],
-            )
-          ],
-        ),
-      );
-    }).toList();
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Monthly Trends
+          Container(
+            decoration: _panelDecoration(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                _panelTitle('6-Month Trend'),
+                SizedBox(
+                  height: 220,
+                  child: BarChart(_buildBarData()),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(width: 16, height: 16, color: emeraldEnd),
+                    const SizedBox(width: 6),
+                    const Text('Income', style: TextStyle(fontSize: 12)),
+                    const SizedBox(width: 16),
+                    Container(width: 16, height: 16, color: Colors.redAccent),
+                    const SizedBox(width: 6),
+                    const Text('Expense', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Top Spending Categories
+          Container(
+            decoration: _panelDecoration(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                _panelTitle('Top Spending Categories'),
+                ...displayCategories.map((entry) {
+                  final cat = categories.firstWhere((c) => c.name == entry.key, orElse: () => Category(id: '', name: entry.key, budget: 0));
+                  final ratio = cat.budget > 0 ? entry.value / cat.budget : 0.0;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            Text('₱${entry.value.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        LinearProgressIndicator(
+                          value: ratio.clamp(0.0, 1.0),
+                          minHeight: 8,
+                          backgroundColor: Colors.grey[200],
+                          color: ratio > 1.0 ? Colors.red : emeraldEnd,
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                if (topCategories.length > 3)
+                  TextButton(
+                    onPressed: () => setState(() => _showMoreOverview = !_showMoreOverview),
+                    style: _textButtonStyle(),
+                    child: Text(_showMoreOverview ? 'Show Less' : 'Show More'),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  List<Widget> _buildRecentSalesList(int limit, bool expanded) {
-    // Flatten sales into a list of maps so we keep both the sale and its parent event
-    final List<Map<String, Object>> allSales = <Map<String, Object>>[];
-    for (final ev in tickets) {
-      for (final s in ev.sales) {
-        allSales.add({'sale': s, 'event': ev});
-      }
-    }
+  Widget _buildCategoriesTab() {
+    final spent = spentByCategory();
+    final displayCategories = _showMoreCategories ? categories : categories.take(5).toList();
 
-    final list = expanded ? allSales : allSales.take(limit).toList();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Budget Categories', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              _gradientButtonIcon(
+                icon: Icons.add,
+                label: 'Add Category',
+                onPressed: _openAddCategoryDialog,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...displayCategories.map((c) {
+            final used = spent[c.name] ?? 0.0;
+            final ratio = c.budget > 0 ? used / c.budget : 0.0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: _categoryRow(c.name, used, c.budget, ratio, c),
+            );
+          }),
+          if (categories.length > 5)
+            TextButton(
+              onPressed: () => setState(() => _showMoreCategories = !_showMoreCategories),
+              style: _textButtonStyle(),
+              child: Text(_showMoreCategories ? 'Show Less' : 'Show More'),
+            ),
+        ],
+      ),
+    );
+  }
 
-    return list.map((entry) {
-      final TicketSale s = entry['sale'] as TicketSale;
-      final TicketEvent ev = entry['event'] as TicketEvent;
+  Widget _buildTransactionsTab() {
+    final displayTransactions = _showMoreTransactions ? transactions : transactions.take(10).toList();
 
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: Row(
-          children: [
-            Expanded(flex: 2, child: Text(s.buyer, overflow: TextOverflow.ellipsis)),
-            const SizedBox(width: 8),
-            Expanded(flex: 3, child: Text(ev.event, overflow: TextOverflow.ellipsis)),
-            const SizedBox(width: 8),
-            Expanded(flex: 1, child: Text('${s.qty}', textAlign: TextAlign.center)),
-            const SizedBox(width: 8),
-            Expanded(flex: 2, child: Text('₱${(s.qty * ev.price).toStringAsFixed(2)}', textAlign: TextAlign.right)),
-            const SizedBox(width: 12),
-            SizedBox(width: 110, child: Text(s.date.toIso8601String().substring(0, 10), textAlign: TextAlign.right)),
-          ],
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Recent Transactions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              _gradientButtonIcon(
+                icon: Icons.add,
+                label: 'Add',
+                onPressed: _openAddTransactionDialog,
+              ),
+            ],
+          ),
         ),
-      );
-    }).toList();
+        Expanded(
+          child: transactions.isEmpty
+              ? const Center(child: Text('No transactions yet', style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: displayTransactions.length + (transactions.length > 10 ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index == displayTransactions.length) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Center(
+                          child: TextButton(
+                            onPressed: () => setState(() => _showMoreTransactions = !_showMoreTransactions),
+                            style: _textButtonStyle(),
+                            child: Text(_showMoreTransactions ? 'Show Less' : 'Show More'),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final tx = displayTransactions[index];
+                    final isIncome = tx.type == 'income';
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: isIncome ? emeraldEnd : Colors.redAccent,
+                          child: Icon(
+                            isIncome ? Icons.arrow_downward : Icons.arrow_upward,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                        title: Text(tx.description, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text('${tx.category} • ${tx.date.toIso8601String().substring(0, 10)}'),
+                        trailing: Text(
+                          '₱${tx.amount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: isIncome ? emeraldEnd : Colors.redAccent,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTicketsTab() {
+    final displayTickets = _showMoreTickets ? tickets : tickets.take(5).toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Ticket Events', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              _gradientButtonIcon(
+                icon: Icons.add,
+                label: 'Add Event',
+                onPressed: () => _openAddEventDialog(),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: tickets.isEmpty
+              ? const Center(child: Text('No ticket events yet', style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: displayTickets.length + (tickets.length > 5 ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index == displayTickets.length) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Center(
+                          child: TextButton(
+                            onPressed: () => setState(() => _showMoreTickets = !_showMoreTickets),
+                            style: _textButtonStyle(),
+                            child: Text(_showMoreTickets ? 'Show Less' : 'Show More'),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final ev = displayTickets[index];
+                    final sold = ev.sales.fold<int>(0, (s, sale) => s + sale.qty);
+                    final revenue = sold * ev.price;
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    ev.event,
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                PopupMenuButton(
+                                  itemBuilder: (context) => [
+                                    PopupMenuItem(
+                                      child: const Text('Edit'),
+                                      onTap: () => Future.delayed(Duration.zero, () => _openAddEventDialog(ev)),
+                                    ),
+                                    PopupMenuItem(
+                                      child: const Text('Record Sale'),
+                                      onTap: () => Future.delayed(Duration.zero, () => _openRecordSaleDialog(ev)),
+                                    ),
+                                    PopupMenuItem(
+                                      child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                                      onTap: () {
+                                        setState(() {
+                                          tickets.removeWhere((t) => t.id == ev.id);
+                                        });
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Price: ₱${ev.price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13)),
+                                      const SizedBox(height: 4),
+                                      Text('Sold: $sold / ${ev.totalTickets}', style: const TextStyle(fontSize: 13)),
+                                      const SizedBox(height: 4),
+                                      Text('Revenue: ₱${revenue.toStringAsFixed(2)}',
+                                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: emeraldEnd)),
+                                    ],
+                                  ),
+                                ),
+                                CircularProgressIndicator(
+                                  value: ev.totalTickets > 0 ? sold / ev.totalTickets : 0.0,
+                                  backgroundColor: Colors.grey[200],
+                                  color: emeraldEnd,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
   }
 }

@@ -1,116 +1,78 @@
-// lib/calendar_page.dart
+// lib/admin/calendar.dart
+// Complete Calendar with Supabase integration - Tasks and Meetings combined
+
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
-import 'package:intl/intl.dart'; // used for header date formatting
+import 'package:intl/intl.dart';
+import '/services/api_service.dart'; // Fixed import path
 
 class Event {
+  final String id;
   final String title;
   final DateTime start;
   final String type;
   final String status;
   final String location;
   final String description;
+  final String source; // 'task' or 'meeting'
+  final Map<String, dynamic>? rawData; // Store original data for editing
 
   Event({
+    required this.id,
     required this.title,
     required this.start,
     required this.type,
     required this.status,
     this.location = '',
     this.description = '',
-  });
-}
-
-void main() {
-  runApp(const MyApp());
-}
-
-class AppStyles {
-  // color palette (single source of truth)
-  static const Color primary = Color(0xFF10B981); // emeraldStart
-  static const Color primaryDark = Color(0xFF059669); // emeraldEnd
-  static const Color softBg = Color(0xFFF7F4F8);
-  static const double borderRadius = 10.0;
-  static Color iconButtonColor = primaryDark;
-}
-
-/// Small reusable Meetings-style gradient pill fab (matches your Meetings page)
-class GradientPillFab extends StatelessWidget {
-  final VoidCallback onPressed;
-  final IconData icon;
-  final String label;
-  final double height;
-  final BorderRadius borderRadius;
-
-  const GradientPillFab({
-    required this.onPressed,
-    required this.icon,
-    required this.label,
-    this.height = 44,
-    this.borderRadius = const BorderRadius.all(Radius.circular(28)),
-    super.key,
+    this.source = 'task',
+    this.rawData,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Ink(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [AppStyles.primary, AppStyles.primaryDark]),
-          borderRadius: borderRadius,
-          boxShadow: const [BoxShadow(color: Color(0x33059669), blurRadius: 10, offset: Offset(0, 6))],
-        ),
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: borderRadius,
-          child: Container(
-            height: height,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 18, color: Colors.white),
-                const SizedBox(width: 10),
-                Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ),
-        ),
-      ),
+  factory Event.fromTask(Map<String, dynamic> task) {
+    DateTime startDate;
+    try {
+      startDate = DateTime.parse(task['due'] ?? DateTime.now().toIso8601String());
+    } catch (e) {
+      startDate = DateTime.now();
+    }
+    
+    return Event(
+      id: 'task_${task['id']}',
+      title: task['title'] ?? 'Untitled Task',
+      start: startDate,
+      type: task['type'] ?? 'assignment',
+      status: task['completed'] == true ? 'Completed' : 'Pending',
+      location: '',
+      description: task['notes'] ?? task['desc'] ?? '',
+      source: 'task',
+      rawData: task,
     );
   }
-}
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final base = ThemeData.light();
-    return MaterialApp(
-      title: 'Calendar Demo',
-      debugShowCheckedModeBanner: false,
-      theme: base.copyWith(
-        scaffoldBackgroundColor: AppStyles.softBg,
-        colorScheme: base.colorScheme.copyWith(primary: AppStyles.primary),
-        floatingActionButtonTheme: FloatingActionButtonThemeData(
-          backgroundColor: AppStyles.primary,
-          foregroundColor: Colors.white,
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(),
-        outlinedButtonTheme: OutlinedButtonThemeData(),
-        textButtonTheme: TextButtonThemeData(),
-        iconTheme: IconThemeData(color: AppStyles.iconButtonColor),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black87,
-          elevation: 0,
-        ),
-      ),
-      home: const CalendarPage(),
+  factory Event.fromMeeting(Map<String, dynamic> meeting) {
+    DateTime startDate;
+    try {
+      startDate = DateTime.parse(meeting['datetime']);
+    } catch (e) {
+      startDate = DateTime.now();
+    }
+    
+    return Event(
+      id: 'meeting_${meeting['id']}',
+      title: meeting['title'] ?? 'Untitled Meeting',
+      start: startDate,
+      type: meeting['type'] ?? 'meeting',
+      status: meeting['status'] ?? 'Not Started',
+      location: meeting['location'] ?? '',
+      description: meeting['purpose'] ?? '',
+      source: 'meeting',
+      rawData: meeting,
     );
   }
+
+  String get taskId => id.replaceFirst('task_', '');
+  int get meetingId => int.tryParse(id.replaceFirst('meeting_', '')) ?? 0;
 }
 
 class CalendarPage extends StatefulWidget {
@@ -125,6 +87,18 @@ class _CalendarPageState extends State<CalendarPage> {
   DateTime? _selectedDate;
   final Map<String, List<Event>> _events = {};
   final DateFormat _labelFormat = DateFormat('EEE, MMM d, yyyy');
+  
+  bool _isLoading = false;
+  bool _isRefreshing = false;
+
+  static const Color primary = Color(0xFF10B981);
+  static const Color primaryDark = Color(0xFF059669);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEvents();
+  }
 
   String _dateKey(DateTime d) =>
       "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
@@ -146,42 +120,271 @@ class _CalendarPageState extends State<CalendarPage> {
     return '$hour:$minute $ampm';
   }
 
+  Future<void> _loadEvents() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+
+    try {
+      // Load both tasks and meetings from backend
+      final tasksData = await ApiService.getTasks();
+      final meetingsData = await ApiService.getMeetings();
+
+      if (!mounted) return;
+
+      final Map<String, List<Event>> newEvents = {};
+
+      // Process tasks
+      for (var task in tasksData) {
+        if (task['due'] != null && task['due'].toString().isNotEmpty) {
+          try {
+            final event = Event.fromTask(task);
+            final key = _dateKey(event.start);
+            newEvents.putIfAbsent(key, () => []);
+            newEvents[key]!.add(event);
+          } catch (e) {
+            debugPrint('Error parsing task: $e');
+          }
+        }
+      }
+
+      // Process meetings
+      for (var meeting in meetingsData) {
+        try {
+          final event = Event.fromMeeting(meeting);
+          final key = _dateKey(event.start);
+          newEvents.putIfAbsent(key, () => []);
+          newEvents[key]!.add(event);
+        } catch (e) {
+          debugPrint('Error parsing meeting: $e');
+        }
+      }
+
+      setState(() {
+        _events.clear();
+        _events.addAll(newEvents);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showSnack('Failed to load events: $e');
+    }
+  }
+
+  Future<void> _refreshEvents() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      final tasksData = await ApiService.getTasks();
+      final meetingsData = await ApiService.getMeetings();
+
+      if (!mounted) return;
+
+      final Map<String, List<Event>> newEvents = {};
+
+      for (var task in tasksData) {
+        if (task['due'] != null && task['due'].toString().isNotEmpty) {
+          try {
+            final event = Event.fromTask(task);
+            final key = _dateKey(event.start);
+            newEvents.putIfAbsent(key, () => []);
+            newEvents[key]!.add(event);
+          } catch (e) {
+            // Silently skip invalid tasks during refresh
+          }
+        }
+      }
+
+      for (var meeting in meetingsData) {
+        try {
+          final event = Event.fromMeeting(meeting);
+          final key = _dateKey(event.start);
+          newEvents.putIfAbsent(key, () => []);
+          newEvents[key]!.add(event);
+        } catch (e) {
+          // Silently skip invalid meetings during refresh
+        }
+      }
+
+      setState(() {
+        _events.clear();
+        _events.addAll(newEvents);
+        _isRefreshing = false;
+      });
+
+      _showSnack('Calendar refreshed');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isRefreshing = false);
+      _showSnack('Failed to refresh: $e');
+    }
+  }
+
+  Future<void> _deleteEvent(Event event) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Event'),
+        content: Text('Are you sure you want to delete "${event.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      Map<String, dynamic> result;
+      
+      if (event.source == 'task') {
+        result = await ApiService.deleteTask(event.taskId);
+      } else {
+        result = await ApiService.deleteMeeting(event.meetingId);
+      }
+
+      if (result['success'] == true) {
+        await _refreshEvents();
+        if (mounted) {
+          _showSnack('${event.source == 'task' ? 'Task' : 'Meeting'} deleted');
+        }
+      } else {
+        if (mounted) {
+          _showSnack(result['message'] ?? 'Failed to delete');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('Error deleting: $e');
+      }
+    }
+  }
+
+  Future<void> _updateTaskStatus(Event event, bool completed) async {
+    if (event.source != 'task') return;
+
+    try {
+      final result = await ApiService.updateTask(
+        event.taskId,
+        {'completed': completed},
+      );
+
+      if (result['success'] == true) {
+        await _refreshEvents();
+        if (mounted) {
+          _showSnack('Task ${completed ? 'completed' : 'reopened'}');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('Error updating task: $e');
+      }
+    }
+  }
+
+  Future<void> _updateMeetingStatus(Event event, String status) async {
+    if (event.source != 'meeting') return;
+
+    try {
+      final result = await ApiService.updateMeeting(
+        event.meetingId,
+        {'status': status},
+      );
+
+      if (result['success'] == true) {
+        await _refreshEvents();
+        if (mounted) {
+          _showSnack('Meeting status updated');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('Error updating meeting: $e');
+      }
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const padding = 12.0;
 
     return Scaffold(
-      // important: extendBody so FAB floats above bottom nav consistently
       extendBody: true,
-      appBar: null,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: padding),
-          child: Column(
-            children: [
-              _headerRightChips(),
-              const SizedBox(height: 12),
-              _monthNavigator(),
-              const SizedBox(height: 10),
-              _weekLabels(),
-              const SizedBox(height: 8),
-              Expanded(child: _monthGrid()),
-            ],
+      appBar: AppBar(
+        title: const Text('Calendar'),
+        actions: [
+          IconButton(
+            icon: Icon(_isRefreshing ? Icons.hourglass_empty : Icons.refresh),
+            onPressed: _isRefreshing ? null : _refreshEvents,
+            tooltip: 'Refresh',
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refreshEvents,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: padding),
+            child: Column(
+              children: [
+                _headerRightChips(),
+                const SizedBox(height: 12),
+                _monthNavigator(),
+                const SizedBox(height: 10),
+                _weekLabels(),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _isLoading 
+                      ? const Center(child: CircularProgressIndicator())
+                      : _monthGrid(),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-
-      // Use Meetings-style floating pill (no manual padding wrapper)
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: GradientPillFab(
-        onPressed: () => _showAddEventDialog(context, DateTime.now()),
-        icon: Icons.add,
-        label: 'Add Event',
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _GradientPillFab(
+            onPressed: () {
+              // Navigate to add task
+              Navigator.pushNamed(context, '/planner').then((_) => _refreshEvents());
+            },
+            icon: Icons.task_alt,
+            label: 'Add Task',
+          ),
+          const SizedBox(height: 12),
+          _GradientPillFab(
+            onPressed: () {
+              // Navigate to add meeting
+              Navigator.pushNamed(context, '/meetings').then((_) => _refreshEvents());
+            },
+            icon: Icons.event,
+            label: 'Add Meeting',
+          ),
+        ],
       ),
     );
   }
 
-  // ------------------ HEADER ------------------
   Widget _headerRightChips() {
     final today = DateTime.now();
     final todayLabel = DateFormat('EEE, MMM d').format(today);
@@ -190,11 +393,10 @@ class _CalendarPageState extends State<CalendarPage> {
     final weekEnd = now.add(const Duration(days: 7));
     final upcomingCount = _events.entries
         .expand((e) => e.value)
-        .where((ev) {
-          final s = ev.start;
-          return (s.isAfter(now.subtract(const Duration(seconds: 1))) &&
-              s.isBefore(weekEnd.add(const Duration(seconds: 1))));
-        })
+        .where((ev) => 
+          ev.start.isAfter(now.subtract(const Duration(seconds: 1))) && 
+          ev.start.isBefore(weekEnd.add(const Duration(seconds: 1)))
+        )
         .length;
 
     return Container(
@@ -202,14 +404,24 @@ class _CalendarPageState extends State<CalendarPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          )
+        ],
       ),
       child: Row(
         children: [
-          Expanded(
+          const Expanded(
             child: Text(
-              'Calendar',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+              'Calendar Overview',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
             ),
           ),
           Column(
@@ -218,15 +430,21 @@ class _CalendarPageState extends State<CalendarPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppStyles.primary.withOpacity(0.08),
+                  color: primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: AppStyles.primary.withOpacity(0.12)),
+                  border: Border.all(color: primary.withValues(alpha: 0.12)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.calendar_today, size: 14, color: AppStyles.primaryDark),
+                    const Icon(Icons.calendar_today, size: 14, color: primaryDark),
                     const SizedBox(width: 8),
-                    Text(todayLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(
+                      todayLabel,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -234,14 +452,20 @@ class _CalendarPageState extends State<CalendarPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppStyles.primary.withOpacity(0.06),
+                  color: primary.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.event_available, size: 14, color: AppStyles.primaryDark),
+                    const Icon(Icons.event_available, size: 14, color: primaryDark),
                     const SizedBox(width: 6),
-                    Text('$upcomingCount upcoming', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text(
+                      '$upcomingCount upcoming',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -252,16 +476,19 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // ------------------ MONTH NAVIGATOR ------------------
   Widget _monthNavigator() {
     return Row(
       children: [
         IconButton(
           icon: const Icon(Icons.chevron_left),
-          color: AppStyles.iconButtonColor,
+          color: primaryDark,
           onPressed: () {
             setState(() {
-              _displayMonth = DateTime(_displayMonth.year, _displayMonth.month - 1, 1);
+              _displayMonth = DateTime(
+                _displayMonth.year,
+                _displayMonth.month - 1,
+                1,
+              );
             });
           },
         ),
@@ -275,10 +502,14 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
         IconButton(
           icon: const Icon(Icons.chevron_right),
-          color: AppStyles.iconButtonColor,
+          color: primaryDark,
           onPressed: () {
             setState(() {
-              _displayMonth = DateTime(_displayMonth.year, _displayMonth.month + 1, 1);
+              _displayMonth = DateTime(
+                _displayMonth.year,
+                _displayMonth.month + 1,
+                1,
+              );
             });
           },
         ),
@@ -286,19 +517,22 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // ------------------ WEEK LABELS ------------------
   Widget _weekLabels() {
     final labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     return Row(
       children: labels
-          .map(
-            (d) => Expanded(child: Center(child: Text(d, style: const TextStyle(fontWeight: FontWeight.w600)))),
-          )
+          .map((d) => Expanded(
+                child: Center(
+                  child: Text(
+                    d,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ))
           .toList(),
     );
   }
 
-  // ------------------ GRID ------------------
   Widget _monthGrid() {
     final first = DateTime(_displayMonth.year, _displayMonth.month, 1);
     final firstWeekday = first.weekday % 7;
@@ -348,16 +582,16 @@ class _CalendarPageState extends State<CalendarPage> {
     Border? border;
 
     if (isSelected) {
-      bgColor = AppStyles.primary;
+      bgColor = primary;
       textColor = Colors.white;
-      border = Border.all(color: AppStyles.primaryDark, width: 1.5);
+      border = Border.all(color: primaryDark, width: 1.5);
     } else if (hasEvents) {
-      bgColor = AppStyles.primary.withOpacity(0.05);
-      textColor = isToday ? AppStyles.primary : Colors.black87;
+      bgColor = primary.withValues(alpha: 0.05);
+      textColor = isToday ? primary : Colors.black87;
       border = Border.all(color: const Color(0xFFE8EAEF));
     } else if (isToday) {
-      bgColor = AppStyles.primary.withOpacity(0.05);
-      textColor = AppStyles.primary;
+      bgColor = primary.withValues(alpha: 0.05);
+      textColor = primary;
       border = Border.all(color: const Color(0xFFE8EAEF));
     } else {
       bgColor = Colors.white;
@@ -374,12 +608,9 @@ class _CalendarPageState extends State<CalendarPage> {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () {
-          setState(() {
-            _selectedDate = date;
-          });
+          setState(() => _selectedDate = date);
           _openDayEvents(date);
         },
-        onLongPress: () => _showAddEventDialog(context, date),
         child: Container(
           decoration: BoxDecoration(
             color: bgColor,
@@ -415,23 +646,28 @@ class _CalendarPageState extends State<CalendarPage> {
                               height: 8,
                               margin: const EdgeInsets.only(right: 4),
                               decoration: BoxDecoration(
-                                color: isSelected ? Colors.white : AppStyles.primary,
+                                color: isSelected ? Colors.white : primary,
                                 borderRadius: BorderRadius.circular(4),
                               ),
                             ),
                           if (overflow > 0)
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
-                                color: isSelected ? Colors.white : AppStyles.primary.withOpacity(0.18),
+                                color: isSelected
+                                    ? Colors.white
+                                    : primary.withValues(alpha: 0.18),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 "+$overflow",
-                                style: TextStyle(
+                                style: const TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w600,
-                                  color: AppStyles.primaryDark,
+                                  color: primaryDark,
                                 ),
                               ),
                             ),
@@ -457,23 +693,16 @@ class _CalendarPageState extends State<CalendarPage> {
       backgroundColor: Colors.transparent,
       builder: (_) {
         return Container(
-          color: Colors.black.withOpacity(0.18),
+          color: Colors.black.withValues(alpha: 0.18),
           child: DraggableScrollableSheet(
             initialChildSize: 0.5,
             maxChildSize: 0.9,
             builder: (context, controller) {
               return Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.12),
-                      blurRadius: 8,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -487,45 +716,25 @@ class _CalendarPageState extends State<CalendarPage> {
                         Expanded(
                           child: Text(
                             _dateLabel(date),
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _showAddEventDialog(context, date);
-                          },
                         ),
                       ],
                     ),
                     const SizedBox(height: 10),
                     Expanded(
                       child: events.isEmpty
-                          ? const Center(child: Text("No events for this day."))
+                          ? const Center(
+                              child: Text("No events for this day."),
+                            )
                           : ListView.separated(
                               controller: controller,
                               itemBuilder: (context, index) {
                                 final e = events[index];
-                                return ListTile(
-                                  title: Text(e.title),
-                                  subtitle: Text("${_timeLabel(e.start)} • ${e.type} • ${e.status}"),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline),
-                                    color: AppStyles.iconButtonColor,
-                                    onPressed: () {
-                                      setState(() {
-                                        _events[key]?.removeAt(index);
-                                        if ((_events[key]?.isEmpty ?? true)) _events.remove(key);
-                                      });
-                                      Navigator.pop(context);
-                                      _openDayEvents(date);
-                                    },
-                                  ),
-                                  onTap: () {
-                                    _showAddEventDialog(context, date, existing: e);
-                                  },
-                                );
+                                return _buildEventTile(e);
                               },
                               separatorBuilder: (_, __) => const Divider(),
                               itemCount: events.length,
@@ -541,291 +750,168 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  Future<void> _showAddEventDialog(
-    BuildContext context,
-    DateTime date, {
-    Event? existing,
-  }) async {
-    final formKey = GlobalKey<FormState>();
-
-    String title = existing?.title ?? '';
-    DateTime start = existing?.start ?? DateTime(date.year, date.month, date.day, 9);
-    String type = existing?.type ?? 'Select';
-    String status = existing?.status ?? 'Not Started';
-    String location = existing?.location ?? '';
-    String description = existing?.description ?? '';
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final mq = MediaQuery.of(sheetContext);
-        return Padding(
-          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-          child: Container(
-            color: Colors.black.withOpacity(0.18),
-            child: DraggableScrollableSheet(
-              initialChildSize: 0.55,
-              minChildSize: 0.35,
-              maxChildSize: 0.95,
-              expand: false,
-              builder: (contextDS, controller) {
-                // === START: STYLED CONTAINER WITH REQUESTED CHANGES ===
-                return Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.12),
-                        blurRadius: 12,
-                        offset: const Offset(0, -6),
-                      ),
-                    ],
+  Widget _buildEventTile(Event event) {
+    return ListTile(
+      leading: Icon(
+        event.source == 'task' ? Icons.task : Icons.event,
+        color: primary,
+      ),
+      title: Text(event.title),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("${_timeLabel(event.start)} • ${event.type}"),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: event.status.toLowerCase().contains('complete')
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  event.status,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: event.status.toLowerCase().contains('complete')
+                        ? Colors.green[700]
+                        : Colors.orange[700],
                   ),
-                  child: SingleChildScrollView(
-                    controller: controller,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      child: StatefulBuilder(
-                        builder: (contextSB, setStateSB) {
-                          return Form(
-                            key: formKey,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // header: centered title + circular green close on right
-                                Row(
-                                  children: [
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        existing == null ? "Add Event" : "Edit Event",
-                                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    // circular green close to match Meetings style
-                                    Material(
-                                      color: AppStyles.primary,
-                                      shape: const CircleBorder(),
-                                      elevation: 4,
-                                      child: IconButton(
-                                        splashRadius: 20,
-                                        icon: const Icon(Icons.close, color: Colors.white),
-                                        onPressed: () => Navigator.pop(sheetContext),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Title (filled look)
-                                TextFormField(
-                                  initialValue: title,
-                                  decoration: InputDecoration(
-                                    hintText: "Title",
-                                    filled: true,
-                                    fillColor: const Color(0xFFF6F7FB),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.transparent),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.transparent),
-                                    ),
-                                  ),
-                                  validator: (v) => v == null || v.isEmpty ? "Please enter a title" : null,
-                                  onChanged: (v) => title = v,
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Row with Type (left) and a gradient "Pick date & time" pill (right).
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: DropdownButtonFormField<String>(
-                                        value: type,
-                                        isExpanded: true,
-                                        items: ["Select", "Class", "Exam", "Meeting", "Personal"]
-                                            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                                            .toList(),
-                                        onChanged: (v) {
-                                          if (v != null) setStateSB(() => type = v);
-                                        },
-                                        decoration: InputDecoration(
-                                          hintText: "Type",
-                                          filled: true,
-                                          fillColor: const Color(0xFFF6F7FB),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    // Pick date & time button with gradient look (keeps original showDatePicker/time pick)
-                                    SizedBox(
-                                      height: 44,
-                                      child: GradientPillFab(
-                                        onPressed: () async {
-                                          final pickedDate = await showDatePicker(
-                                            context: sheetContext,
-                                            initialDate: start,
-                                            firstDate: DateTime(2000),
-                                            lastDate: DateTime(2100),
-                                          );
-                                          if (pickedDate == null) return;
-
-                                          final pickedTime = await showTimePicker(
-                                            context: sheetContext,
-                                            initialTime: TimeOfDay.fromDateTime(start),
-                                          );
-
-                                          setStateSB(() {
-                                            start = DateTime(
-                                              pickedDate.year,
-                                              pickedDate.month,
-                                              pickedDate.day,
-                                              pickedTime?.hour ?? start.hour,
-                                              pickedTime?.minute ?? start.minute,
-                                            );
-                                          });
-                                        },
-                                        icon: Icons.calendar_today,
-                                        label: "Pick date & time",
-                                        height: 44,
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Status dropdown (full width)
-                                DropdownButtonFormField<String>(
-                                  value: status,
-                                  isExpanded: true,
-                                  items: ["Not Started", "In Progress", "Completed"]
-                                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                                      .toList(),
-                                  onChanged: (v) {
-                                    if (v != null) setStateSB(() => status = v);
-                                  },
-                                  decoration: InputDecoration(
-                                    hintText: "Status",
-                                    filled: true,
-                                    fillColor: const Color(0xFFF6F7FB),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                                  ),
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Location (full width) — removed Virtual checkbox per request
-                                TextFormField(
-                                  initialValue: location,
-                                  decoration: InputDecoration(
-                                    hintText: "Location",
-                                    filled: true,
-                                    fillColor: const Color(0xFFF6F7FB),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                                  ),
-                                  onChanged: (v) => location = v,
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Description / Purpose (filled, multi-line)
-                                TextFormField(
-                                  initialValue: description,
-                                  maxLines: 4,
-                                  decoration: InputDecoration(
-                                    hintText: "Purpose",
-                                    filled: true,
-                                    fillColor: const Color(0xFFF6F7FB),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                                  ),
-                                  onChanged: (v) => description = v,
-                                ),
-
-                                const SizedBox(height: 16),
-
-                                // Action row: right-aligned Cancel and Save (Students/Add removed)
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(sheetContext),
-                                      child: const Text("Cancel"),
-                                      style: TextButton.styleFrom(foregroundColor: AppStyles.primaryDark),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    ElevatedButton(
-                                      onPressed: () {
-                                        if (formKey.currentState!.validate()) {
-                                          final newEvent = Event(
-                                            title: title,
-                                            start: start,
-                                            type: type,
-                                            status: status,
-                                            location: location,
-                                            description: description,
-                                          );
-
-                                          final key = _dateKey(DateTime(start.year, start.month, start.day));
-
-                                          if (existing != null) {
-                                            final oldKey = _dateKey(existing.start);
-                                            _events[oldKey]?.remove(existing);
-                                            if ((_events[oldKey]?.isEmpty ?? true)) {
-                                              _events.remove(oldKey);
-                                            }
-                                          }
-
-                                          setState(() {
-                                            _events.putIfAbsent(key, () => []);
-                                            _events[key]!.add(newEvent);
-                                            _selectedDate = DateTime(start.year, start.month, start.day);
-                                          });
-
-                                          Navigator.pop(sheetContext);
-                                        }
-                                      },
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: AppStyles.primary,
-                                        foregroundColor: Colors.white, // ensures white text
-                                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      ),
-                                      child: const Text("Save", style: TextStyle(color: Colors.white)),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                );
-                // === END: STYLED CONTAINER ===
-              },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Chip(
+                label: Text(
+                  event.source.toUpperCase(),
+                  style: const TextStyle(fontSize: 10),
+                ),
+                backgroundColor: primary.withValues(alpha: 0.1),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        ],
+      ),
+      trailing: PopupMenuButton<String>(
+        icon: const Icon(Icons.more_vert),
+        onSelected: (value) async {
+          switch (value) {
+            case 'complete':
+              if (event.source == 'task') {
+                await _updateTaskStatus(event, true);
+              } else {
+                await _updateMeetingStatus(event, 'Completed');
+              }
+              break;
+            case 'reopen':
+              if (event.source == 'task') {
+                await _updateTaskStatus(event, false);
+              } else {
+                await _updateMeetingStatus(event, 'Not Started');
+              }
+              break;
+            case 'delete':
+              Navigator.pop(context); // Close bottom sheet first
+              await _deleteEvent(event);
+              break;
+          }
+        },
+        itemBuilder: (context) => [
+          if (event.status.toLowerCase() != 'completed')
+            const PopupMenuItem(
+              value: 'complete',
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, size: 20),
+                  SizedBox(width: 8),
+                  Text('Mark Complete'),
+                ],
+              ),
+            ),
+          if (event.status.toLowerCase() == 'completed')
+            const PopupMenuItem(
+              value: 'reopen',
+              child: Row(
+                children: [
+                  Icon(Icons.replay, size: 20),
+                  SizedBox(width: 8),
+                  Text('Reopen'),
+                ],
+              ),
+            ),
+          const PopupMenuItem(
+            value: 'delete',
+            child: Row(
+              children: [
+                Icon(Icons.delete, size: 20, color: Colors.red),
+                SizedBox(width: 8),
+                Text('Delete', style: TextStyle(color: Colors.red)),
+              ],
             ),
           ),
-        );
-      },
+        ],
+      ),
+      isThreeLine: true,
+    );
+  }
+}
+
+class _GradientPillFab extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+
+  const _GradientPillFab({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF10B981), Color(0xFF059669)],
+          ),
+          borderRadius: BorderRadius.all(Radius.circular(28)),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x33059669),
+              blurRadius: 10,
+              offset: Offset(0, 6),
+            )
+          ],
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: const BorderRadius.all(Radius.circular(28)),
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: Colors.white),
+                const SizedBox(width: 10),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
