@@ -1,8 +1,9 @@
 // lib/admin/budget_dashboard.dart
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../services/api_service.dart';
+
+bool _isLoading = false;
 
 class BudgetPage extends StatefulWidget {
   const BudgetPage({Key? key}) : super(key: key);
@@ -172,43 +173,25 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
     return map;
   }
 
-  Future<void> _exportJson() async {
-    try {
-      final payload = {
-        'categories': categories.map((c) => c.toMap()).toList(),
-        'transactions': transactions.map((t) => t.toMap()).toList(),
-        'tickets': tickets.map((e) => e.toMap()).toList(),
-        'exportedAt': DateTime.now().toIso8601String(),
-      };
-      final raw = const JsonEncoder.withIndent('  ').convert(payload);
-      await Clipboard.setData(ClipboardData(text: raw));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exported JSON copied to clipboard')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
-    }
-  }
-
   // --------------------------
-  // Gradient button helpers
+  // Button style updated to match Meetings page: gradient emerald pill with subtle shadow
   // --------------------------
   Widget _gradientButton({required Widget child, required VoidCallback onPressed, EdgeInsets? padding, BorderRadius? borderRadius}) {
-    final br = borderRadius ?? BorderRadius.circular(8);
+    final br = borderRadius ?? BorderRadius.circular(999);
     return Material(
       color: Colors.transparent,
       child: Ink(
         decoration: BoxDecoration(
           gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
           borderRadius: br,
+          boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.18), blurRadius: 12, offset: const Offset(0, 6))],
         ),
         child: InkWell(
           onTap: onPressed,
           borderRadius: br,
-          child: Padding(
-            padding: padding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: DefaultTextStyle(style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600), child: child),
+          child: Container(
+            padding: padding ?? const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: DefaultTextStyle(style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700), child: child),
           ),
         ),
       ),
@@ -216,15 +199,16 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
   }
 
   Widget _gradientButtonIcon({required IconData icon, required String label, required VoidCallback onPressed, EdgeInsets? padding}) {
+    // Pill with icon on left (compact), matches meetings "Add Meeting" pill
     return _gradientButton(
       onPressed: onPressed,
-      padding: padding ?? const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: padding ?? const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: Colors.white),
+          Icon(icon, size: 16, color: Colors.white),
           const SizedBox(width: 8),
-          Text(label),
+          Text(label, style: const TextStyle(fontSize: 14)),
         ],
       ),
     );
@@ -235,8 +219,117 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
     return TextButton.styleFrom(foregroundColor: emeraldEnd);
   }
 
+  // A pill-style gradient floating action (same look as meetings' pill)
+  // We'll use this as Scaffold.floatingActionButton
+  Widget _gradientPillFab({required VoidCallback onPressed, required IconData icon, required String label, double height = 44}) {
+    final BorderRadius br = BorderRadius.circular(28);
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
+          borderRadius: br,
+          boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.20), blurRadius: 10, offset: const Offset(0, 6))],
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: br,
+          child: Container(
+            height: height,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: Colors.white),
+                const SizedBox(width: 10),
+                Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+Future<void> loadBudgetData() async {
+  setState(() => _isLoading = true);
+  
+  try {
+    final data = await ApiService.getBudgetData();
+    
+    setState(() {
+      categories = (data['categories'] as List).map((c) =>
+        Category(
+          id: c['id'].toString(),
+          name: c['name'],
+          budget: (c['budget'] as num).toDouble(),
+        )
+      ).toList();
+      
+      transactions = (data['transactions'] as List).map((t) =>
+        TransactionModel(
+          id: t['id'].toString(),
+          description: t['description'],
+          category: t['category'],
+          amount: (t['amount'] as num).toDouble(),
+          type: t['type'],
+          date: DateTime.parse(t['date']),
+        )
+      ).toList();
+      
+      tickets = (data['tickets'] as List).map((ticket) =>
+        TicketEvent(
+          id: ticket['id'].toString(),
+          event: ticket['event'],
+          totalTickets: ticket['totalTickets'],
+          price: (ticket['price'] as num).toDouble(),
+          sales: (ticket['sales'] as List).map((s) =>
+            TicketSale(
+              buyer: s['buyer'],
+              qty: s['qty'],
+              date: DateTime.parse(s['date']),
+            )
+          ).toList(),
+        )
+      ).toList();
+    });
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error loading budget: $e')),
+    );
+  } finally {
+    setState(() => _isLoading = false);
+  }
+}
+
+Future<void> createTransaction(TransactionModel transaction) async {
+  try {
+    final result = await ApiService.createTransaction(
+      type: transaction.type,
+      category: transaction.category,
+      description: transaction.description,
+      amount: transaction.amount,
+      date: transaction.date.toIso8601String(),
+    );
+
+    if (result['success'] == true) {
+      await loadBudgetData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Transaction recorded')),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error: $e')),
+    );
+  }
+}
+
+
   // --------------------------------
 
+  // UPDATED: restyled transaction dialog to match the Meetings/Calendar form.
+  // Uses a bottom sheet with rounded top, filled inputs, green Save pill with white text.
+  // FIXED: make sheet wrap to content so Save is visible without scrolling up first.
   void _openAddTransactionDialog() {
     final descCtl = TextEditingController();
     final amountCtl = TextEditingController();
@@ -244,76 +337,187 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
     String category = categories.isNotEmpty ? categories.first.name : 'General';
     DateTime date = DateTime.now();
 
-    showDialog(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text('Add Transaction'),
-            content: SingleChildScrollView(
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final mq = MediaQuery.of(sheetContext);
+        return Padding(
+          // keep keyboard padding so sheet moves above keyboard when it appears
+          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, -6))],
+            ),
+            // Using SingleChildScrollView + Column(mainAxisSize: MainAxisSize.min) wrapped in Padding
+            // ensures the sheet sizes to its content so Save is visible without an initial scroll.
+            child: SingleChildScrollView(
               physics: const ClampingScrollPhysics(),
-              child: Column(
-                children: [
-                  TextField(controller: descCtl, decoration: const InputDecoration(labelText: 'Description')),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: type,
-                    items: ['expense', 'income']
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e[0].toUpperCase() + e.substring(1))))
-                        .toList(),
-                    onChanged: (v) => type = v ?? 'expense',
-                    decoration: const InputDecoration(labelText: 'Type'),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: category,
-                    items: categories.map((c) => DropdownMenuItem(value: c.name, child: Text(c.name))).toList(),
-                    onChanged: (v) => category = v ?? (categories.isNotEmpty ? categories.first.name : 'General'),
-                    decoration: const InputDecoration(labelText: 'Category'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(controller: amountCtl, decoration: const InputDecoration(labelText: 'Amount'), keyboardType: TextInputType.number),
-                  const SizedBox(height: 8),
-                  Row(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: StatefulBuilder(builder: (contextSB, setStateSB) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min, // <- key: wrap to content
                     children: [
-                      const Text('Date: '),
-                      TextButton(
-                          style: _textButtonStyle(),
-                          onPressed: () async {
-                            final picked = await showDatePicker(context: context, initialDate: date, firstDate: DateTime(2000), lastDate: DateTime(2100));
-                            if (picked != null) setState(() => date = picked);
-                          },
-                          child: Text('${date.toIso8601String().substring(0, 10)}')),
+                      // header: title centered + circular green close button
+                      Row(
+                        children: [
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Add Transaction',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          Material(
+                            color: emeraldStart,
+                            shape: const CircleBorder(),
+                            elevation: 4,
+                            child: IconButton(
+                              splashRadius: 20,
+                              icon: const Icon(Icons.close, color: Colors.white),
+                              onPressed: () => Navigator.pop(sheetContext),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Description - filled style
+                      TextField(
+                        controller: descCtl,
+                        decoration: InputDecoration(
+                          hintText: 'Description',
+                          filled: true,
+                          fillColor: const Color(0xFFF6F7FB),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Type dropdown (filled)
+                      DropdownButtonFormField<String>(
+                        value: type,
+                        isExpanded: true,
+                        items: ['expense', 'income']
+                            .map((e) => DropdownMenuItem(value: e, child: Text(e[0].toUpperCase() + e.substring(1))))
+                            .toList(),
+                        onChanged: (v) => setStateSB(() => type = v ?? 'expense'),
+                        decoration: InputDecoration(
+                          hintText: 'Type',
+                          filled: true,
+                          fillColor: const Color(0xFFF6F7FB),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Category dropdown (filled)
+                      DropdownButtonFormField<String>(
+                        value: category,
+                        isExpanded: true,
+                        items: categories.map((c) => DropdownMenuItem(value: c.name, child: Text(c.name))).toList(),
+                        onChanged: (v) => setStateSB(() => category = v ?? (categories.isNotEmpty ? categories.first.name : 'General')),
+                        decoration: InputDecoration(
+                          hintText: 'Category',
+                          filled: true,
+                          fillColor: const Color(0xFFF6F7FB),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Amount - filled
+                      TextField(
+                        controller: amountCtl,
+                        decoration: InputDecoration(
+                          hintText: 'Amount',
+                          filled: true,
+                          fillColor: const Color(0xFFF6F7FB),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Date row (text with emerald link)
+                      Row(
+                        children: [
+                          const Text('Date: '),
+                          TextButton(
+                            style: _textButtonStyle(),
+                            onPressed: () async {
+                              final picked = await showDatePicker(context: contextSB, initialDate: date, firstDate: DateTime(2000), lastDate: DateTime(2100));
+                              if (picked != null) setStateSB(() => date = picked);
+                            },
+                            child: Text('${date.toIso8601String().substring(0, 10)}'),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 6),
+                      const Text('(Receipt upload not implemented in this demo)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 16),
+
+                      // Actions: Cancel (text) + Save (emerald pill with white text)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            child: const Text('Cancel'),
+                            style: _textButtonStyle(),
+                          ),
+                          const SizedBox(width: 8),
+                          // Save as gradient pill. _gradientButton ensures white text by default.
+                          _gradientButton(
+                            onPressed: () {
+                              final amt = double.tryParse(amountCtl.text) ?? 0.0;
+                              setState(() {
+                                transactions.insert(
+                                  0,
+                                  TransactionModel(
+                                    id: UniqueKey().toString(),
+                                    description: descCtl.text.isEmpty ? 'Transaction' : descCtl.text,
+                                    category: category,
+                                    amount: amt,
+                                    type: type,
+                                    date: date,
+                                  ),
+                                );
+                              });
+                              Navigator.pop(sheetContext);
+                            },
+                            child: const Text('Save'),
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 12),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('(Receipt upload not implemented in this demo)', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
+                  );
+                }),
               ),
             ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), style: _textButtonStyle(), child: const Text('Cancel')),
-              // Save gradient button
-              Padding(
-                padding: const EdgeInsets.only(right: 8.0),
-                child: _gradientButton(onPressed: () {
-                  final amt = double.tryParse(amountCtl.text) ?? 0.0;
-                  setState(() {
-                    transactions.insert(
-                        0,
-                        TransactionModel(
-                            id: UniqueKey().toString(),
-                            description: descCtl.text.isEmpty ? 'Transaction' : descCtl.text,
-                            category: category,
-                            amount: amt,
-                            type: type,
-                            date: date));
-                  });
-                  Navigator.pop(ctx);
-                }, child: const Text('Save')),
-              ),
-            ],
-          );
-        });
+          ),
+        );
+      },
+    );
   }
 
   void _openAddEventDialog([TicketEvent? edit]) {
@@ -461,14 +665,17 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 36)),
         bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  final idx = value.toInt();
-                  if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
-                  final label = months[idx].substring(5);
-                  return SideTitleWidget(axisSide: meta.axisSide, child: Text(label, style: const TextStyle(fontSize: 10)));
-                }))),
+          sideTitles: SideTitles(
+            showTitles: true,
+            getTitlesWidget: (value, meta) {
+              final idx = value.toInt();
+              if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
+              final label = months[idx].substring(5);
+              return SideTitleWidget(axisSide: meta.axisSide, child: Text(label, style: const TextStyle(fontSize: 10)));
+            },
+          ),
+        ),
+      ),
       gridData: FlGridData(show: true),
       borderData: FlBorderData(show: false),
     );
@@ -530,7 +737,7 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
                 decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12)),
               ),
             ),
-            // Update -> gradient
+            // Update -> emerald pill now
             _gradientButton(onPressed: () {
               setState(() {
                 c.budget = double.tryParse(ctl.text) ?? c.budget;
@@ -726,17 +933,16 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Add Transaction -> gradient icon button
+                            // Add Transaction -> emerald pill matching meetings
                             _gradientButtonIcon(icon: Icons.add, label: 'Add Transaction', onPressed: _openAddTransactionDialog),
                             const SizedBox(height: 10),
-                            // Export JSON -> gradient icon button
-                            _gradientButtonIcon(icon: Icons.file_download, label: 'Export JSON', onPressed: _exportJson),
+                            // NOTE: Export JSON removed
                           ],
                         ),
 
                         const SizedBox(width: 12),
 
-                        // Add Event -> gradient icon button
+                        // Add Event -> emerald pill matching meetings
                         _gradientButtonIcon(icon: Icons.event, label: 'Add Event', onPressed: () => _openAddEventDialog()),
 
                         const Spacer(),
@@ -1006,6 +1212,7 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
                       const Text('Income vs Expense (Monthly)', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
                       SizedBox(height: 200, child: BarChart(_buildBarData(), swapAnimationDuration: const Duration(milliseconds: 350))),
+
                     ]))
                   ]);
 
@@ -1021,12 +1228,9 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openAddTransactionDialog,
-        child: const Icon(Icons.add),
-        backgroundColor: emeraldEnd,
-        foregroundColor: Colors.white,
-      ),
+      // replace circular FAB with a pill-style gradient FAB like Meetings page
+      floatingActionButton: _gradientPillFab(onPressed: _openAddTransactionDialog, icon: Icons.add, label: 'Add Transaction'),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -1082,48 +1286,89 @@ class _BudgetPageState extends State<BudgetPage> with SingleTickerProviderStateM
 
   List<Widget> _buildTicketEventsList(int limit, bool expanded) {
     final list = expanded ? tickets : tickets.take(limit).toList();
+
     return list.map((ev) {
       final sold = ev.sales.fold<int>(0, (a, b) => a + b.qty);
       final remaining = (ev.totalTickets - sold).clamp(0, ev.totalTickets);
+
       return Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         decoration: _panelDecoration(),
         padding: const EdgeInsets.all(14),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(ev.event, style: const TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text('${ev.totalTickets} tickets • ₱${ev.price.toStringAsFixed(2)}', style: const TextStyle(color: Colors.grey))])),
-          const SizedBox(width: 8),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('$sold sold • $remaining left', style: const TextStyle(color: Colors.grey)),
-            const SizedBox(height: 10),
-            Wrap(spacing: 8, runSpacing: 6, children: [
-              _gradientButton(onPressed: () => _openAddEventDialog(ev), child: const Text('Edit')),
-              _gradientButton(onPressed: () => _openRecordSaleDialog(ev), child: const Text('Record Sale')),
-              OutlinedButton(onPressed: () => setState(() => tickets.removeWhere((x) => x.id == ev.id)), style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red), foregroundColor: Colors.red), child: const Text('Delete'))
-            ])
-          ])
-        ]),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left: Event info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(ev.event, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 6),
+                  Text('${ev.totalTickets} tickets • ₱${ev.price.toStringAsFixed(2)}', style: TextStyle(color: Colors.grey[600])),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 12),
+
+            // Right: stats + actions
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('$sold sold • $remaining left', style: TextStyle(color: Colors.grey[700])),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _gradientButton(onPressed: () => _openAddEventDialog(ev), child: const Text('Edit')),
+                    _gradientButton(onPressed: () => _openRecordSaleDialog(ev), child: const Text('Record Sale')),
+                    OutlinedButton(
+                      onPressed: () => setState(() => tickets.removeWhere((x) => x.id == ev.id)),
+                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red), foregroundColor: Colors.red),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                )
+              ],
+            )
+          ],
+        ),
       );
     }).toList();
   }
 
   List<Widget> _buildRecentSalesList(int limit, bool expanded) {
-    final allSales = tickets.expand((ev) => ev.sales.map((s) {
-      return {'sale': s, 'event': ev};
-    })).toList();
+    // Flatten sales into a list of maps so we keep both the sale and its parent event
+    final List<Map<String, Object>> allSales = <Map<String, Object>>[];
+    for (final ev in tickets) {
+      for (final s in ev.sales) {
+        allSales.add({'sale': s, 'event': ev});
+      }
+    }
+
     final list = expanded ? allSales : allSales.take(limit).toList();
+
     return list.map((entry) {
       final TicketSale s = entry['sale'] as TicketSale;
       final TicketEvent ev = entry['event'] as TicketEvent;
+
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: Row(children: [
-          Expanded(flex: 2, child: Text(s.buyer, overflow: TextOverflow.ellipsis)),
-          Expanded(flex: 3, child: Text(ev.event, overflow: TextOverflow.ellipsis)),
-          Expanded(flex: 1, child: Text('${s.qty}', textAlign: TextAlign.center)),
-          Expanded(flex: 2, child: Text('₱${(s.qty * ev.price).toStringAsFixed(2)}', textAlign: TextAlign.right)),
-          const SizedBox(width: 12),
-          SizedBox(width: 110, child: Text(s.date.toIso8601String().substring(0, 10), textAlign: TextAlign.right)),
-        ]),
+        child: Row(
+          children: [
+            Expanded(flex: 2, child: Text(s.buyer, overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 8),
+            Expanded(flex: 3, child: Text(ev.event, overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 8),
+            Expanded(flex: 1, child: Text('${s.qty}', textAlign: TextAlign.center)),
+            const SizedBox(width: 8),
+            Expanded(flex: 2, child: Text('₱${(s.qty * ev.price).toStringAsFixed(2)}', textAlign: TextAlign.right)),
+            const SizedBox(width: 12),
+            SizedBox(width: 110, child: Text(s.date.toIso8601String().substring(0, 10), textAlign: TextAlign.right)),
+          ],
+        ),
       );
     }).toList();
   }

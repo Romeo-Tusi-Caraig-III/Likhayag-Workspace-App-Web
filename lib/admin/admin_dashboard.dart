@@ -1,12 +1,9 @@
-// lib/dashboard_page.dart
-// Dashboard — Emerald theme: unify greens to _accentGreen; keep custom burger gradient as brighter two-color gradient
-
+// lib/admin/admin_dashboard.dart
+// (adjusted to remove AppBar; keeps internal header / drawer)
 import 'dart:convert';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:student_workspace/admin/budget.dart';
 import 'package:student_workspace/admin/profile.dart';
 import 'package:student_workspace/admin/planner_dashboard.dart';
@@ -27,20 +24,17 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   late final AnimationController _pulseController;
 
-  // Persistent search controller (fixes rebuild / late init issues)
   final TextEditingController _searchController = TextEditingController();
 
-  // Design tokens — consistent emerald green
   static const _cardRadius = 16.0;
   static const _borderColor = Color(0xFFE6ECE6);
-  static const _accentGreen = Color(0xFF10B981); // burger token (now primary green used across buttons)
+  static const _accentGreen = Color(0xFF10B981);
   static const _muted = Color(0xFF6B7280);
 
   @override
   void initState() {
     super.initState();
     _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
-    // keep controller and searchQuery in sync
     _searchController.text = searchQuery;
     _searchController.addListener(() {
       if (!mounted) return;
@@ -111,7 +105,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   void _openPlanner() {
     try {
-      Navigator.of(context).push(MaterialPageRoute(builder: (c) => const PlannerPage()));
+      // Removed 'const' in call site: PlannerPage() (constructor may not be const)
+      Navigator.of(context).push(MaterialPageRoute(builder: (c) => PlannerPage()));
     } catch (e) {
       _showSnack('Failed to open planner: $e');
     }
@@ -119,7 +114,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   void _openBudget() {
     try {
-      Navigator.of(context).push(MaterialPageRoute(builder: (c) => const BudgetPage()));
+      // Removed 'const'
+      Navigator.of(context).push(MaterialPageRoute(builder: (c) => BudgetPage()));
     } catch (e) {
       _showSnack('Failed to open budget: $e');
     }
@@ -127,7 +123,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   void _openMeetings() {
     try {
-      Navigator.of(context).push(MaterialPageRoute(builder: (c) => const MeetingsPage()));
+      // Removed 'const'
+      Navigator.of(context).push(MaterialPageRoute(builder: (c) => MeetingsPage()));
     } catch (e) {
       _showSnack('Failed to open meetings: $e');
     }
@@ -139,6 +136,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       return;
     } catch (_) {}
     try {
+      // _EmbeddedCalendarPage has a const constructor, it's fine to keep const but not required
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => const _EmbeddedCalendarPage()));
     } catch (e) {
       _showSnack('Failed to open calendar: $e');
@@ -147,6 +145,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   void _openProfile() {
     try {
+      // Removed 'const'
       Navigator.of(context).push(MaterialPageRoute(builder: (c) => ProfilePage()));
     } catch (e) {
       _showSnack('Failed to open profile: $e');
@@ -158,7 +157,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       case 'high':
         return Colors.red.shade500;
       case 'low':
-        // unify all green usages to the emerald token
         return _accentGreen;
       case 'medium':
       default:
@@ -166,70 +164,41 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     }
   }
 
-  Widget _buildAppBar(BuildContext ctx) {
-    return AppBar(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      centerTitle: false,
-      automaticallyImplyLeading: false, // we provide a custom leading widget
-      // custom leading (enhanced burger)
-      leadingWidth: 72,
-      leading: Padding(
-        padding: const EdgeInsets.only(left: 14.0),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () {
-              // open drawer safely
-              if (_scaffoldKey.currentState != null && !_scaffoldKey.currentState!.isDrawerOpen) {
-                _scaffoldKey.currentState!.openDrawer();
-              } else {
-                // fallback: try Navigator
-                try {
-                  Scaffold.of(ctx).openDrawer();
-                } catch (_) {}
-              }
-            },
-            splashColor: _accentGreen.withOpacity(0.18),
-            child: Container(
-              height: 42,
-              width: 42,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                // KEEP the custom burger bright two-color gradient per request
-                gradient: const LinearGradient(
-                  colors: [_accentGreen, _accentGreen],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 10, offset: const Offset(0, 6)),
-                ],
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.menu,
-                  color: Colors.white,
-                  size: 20,
-                  semanticLabel: 'Open navigation drawer',
+  Widget _buildTopControls() {
+    // This used to be inside an AppBar — now it's a compact top control row inside page
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: Row(
+        children: [
+          // menu button (keeps a tappable visual to open drawer)
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  if (_scaffoldKey.currentState != null && !_scaffoldKey.currentState!.isDrawerOpen) {
+                    _scaffoldKey.currentState!.openDrawer();
+                  }
+                },
+                child: Container(
+                  height: 42,
+                  width: 42,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: _accentGreen,
+                  ),
+                  child: const Center(child: Icon(Icons.menu, color: Colors.white, size: 20)),
                 ),
               ),
             ),
           ),
-        ),
-      ),
-      // title left intentionally empty
-      title: const SizedBox.shrink(),
-      actions: [
-        // Search chip (smaller; uses controller)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 180, minWidth: 80),
+          Expanded(
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 240),
               curve: Curves.easeOut,
+              height: 42,
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(28),
@@ -238,8 +207,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
               ),
               child: Row(
                 children: [
-                  const SizedBox(width: 8),
-                  Icon(Icons.search, color: _muted),
+                  const SizedBox(width: 12),
+                  const Icon(Icons.search, color: Color(0xFF6B7280)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
@@ -248,60 +217,14 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                       textInputAction: TextInputAction.search,
                     ),
                   ),
-                  if (searchQuery.isNotEmpty)
-                    GestureDetector(
-                      onTap: () {
-                        _searchController.clear();
-                        setState(() => searchQuery = '');
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Icon(Icons.close, size: 18, color: _muted),
-                      ),
-                    ),
+                  IconButton(onPressed: () {}, icon: const Icon(Icons.notifications, color: Colors.black54)),
+                  const SizedBox(width: 8),
                 ],
               ),
             ),
           ),
-        ),
-
-        IconButton(
-          tooltip: 'Notifications',
-          onPressed: () => _showSnack('No notifications'),
-          icon: const Icon(Icons.notifications, color: Colors.black54),
-        ),
-
-        // Profile avatar with menu
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: PopupMenuButton<int>(
-            tooltip: 'Account',
-            onSelected: (v) {
-              if (v == 1) _openProfile();
-              if (v == 2) _showSnack('Settings not implemented');
-              if (v == 3) {
-                try {
-                  Navigator.pushReplacementNamed(context, '/login');
-                } catch (_) {
-                  _showSnack('/login route not defined');
-                }
-              }
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(value: 1, child: Text('Profile')),
-              const PopupMenuItem(value: 2, child: Text('Settings')),
-              const PopupMenuDivider(),
-              const PopupMenuItem(value: 3, child: Text('Sign Out')),
-            ],
-            child: CircleAvatar(
-              radius: 18,
-              backgroundColor: _accentGreen,
-              child: const Text('A', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-      ],
+        ],
+      ),
     );
   }
 
@@ -546,12 +469,15 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     return Scaffold(
       key: _scaffoldKey,
       drawer: _buildDrawer(),
-      appBar: PreferredSize(preferredSize: const Size.fromHeight(88), child: _buildAppBar(context)),
+      // AppBar removed entirely so there is no top title/header in this page.
       backgroundColor: const Color(0xFFF7FBF7),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(18),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // small top controls row replaces the old AppBar area
+            _buildTopControls(),
+            const SizedBox(height: 12),
             _heroHeader(context),
             const SizedBox(height: 18),
             LayoutBuilder(builder: (ctx, bc) {
@@ -580,13 +506,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           ]),
         ),
       ),
-      // FAB removed per request
     );
   }
 
-  // MODERN EMERALD DRAWER
   Drawer _buildDrawer() {
-    // list of navigation items
     final items = [
       {'icon': Icons.home, 'title': 'Home', 'action': () => Navigator.pop(context)},
       {'icon': Icons.calendar_today, 'title': 'Calendar', 'action': () { Navigator.pop(context); _openCalendar(); }},
@@ -599,17 +522,15 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     return Drawer(
       child: Container(
         decoration: BoxDecoration(
-          // unify drawer greens to the accent token
           gradient: LinearGradient(
-          colors: [_accentGreen, const Color(0xFF059669)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+            colors: [_accentGreen, const Color(0xFF059669)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
         child: SafeArea(
           child: Column(
             children: [
-              // header
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 18),
                 child: Row(
@@ -623,7 +544,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                         Text('Academic Success', style: TextStyle(color: Colors.white70, fontSize: 13)),
                       ]),
                     ),
-                    // small settings icon in header
                     IconButton(
                       onPressed: () => _showSnack('Settings not implemented'),
                       icon: const Icon(Icons.settings, color: Colors.white70),
@@ -632,7 +552,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                 ),
               ),
 
-              // search/quick actions inside drawer (optional)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: TextField(
@@ -652,7 +571,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
               const SizedBox(height: 12),
 
-              // nav items
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 8),
@@ -691,7 +609,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                 ),
               ),
 
-              // footer actions (removed the white + button)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
                 child: Row(
@@ -699,7 +616,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () {
-                          // sign out
                           try {
                             Navigator.pushReplacementNamed(context, '/login');
                           } catch (_) {
@@ -792,21 +708,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     );
   }
 
-  // Date formatting helpers
   static String _formatDateShort(DateTime d) {
     const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
     ];
     return '${monthNames[d.month - 1]} ${d.day}, ${d.year}';
   }

@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter/services.dart';
+import '../services/api_service.dart';
 
 class Task {
   Task({
@@ -139,7 +139,7 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
   final TextEditingController _dueDateCtl = TextEditingController();
   String _type = 'assignment';
   String _priority = 'medium';
-  int _progress = 0;
+  int _progress = 0; // kept as internal state but hidden from UI
   bool _completed = false;
   int? _editingId;
   DateTime? _pickedDate;
@@ -155,6 +155,10 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
   // Emerald for the active thumb
   static const Color segEmerald = Color(0xFF059669);
   static const Color segEmeraldDark = Color(0xFF047857);
+
+  // show-more for tasks
+  final int _maxVisibleTasks = 2;
+  bool _showMoreTasks = false;
 
   @override
   void initState() {
@@ -214,6 +218,30 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
             createdAtIso: now.toIso8601String(),
             course: 'HIST110',
             tags: ['revision', 'exam']),
+        Task(
+            id: 4,
+            title: 'Physics Homework',
+            desc: 'Chapter 7 problems',
+            type: 'assignment',
+            priority: 'medium',
+            dueDateIso: DateTime(now.year, now.month, now.day + 1).toIso8601String(),
+            progress: 10,
+            completed: false,
+            createdAtIso: now.toIso8601String(),
+            course: 'PHYS101',
+            tags: ['homework']),
+        Task(
+            id: 5,
+            title: 'English Essay',
+            desc: 'Draft introduction',
+            type: 'assignment',
+            priority: 'low',
+            dueDateIso: DateTime(now.year, now.month, now.day + 6).toIso8601String(),
+            progress: 0,
+            completed: false,
+            createdAtIso: now.toIso8601String(),
+            course: 'ENG201',
+            tags: ['essay']),
       ];
       tasks.addAll(sample);
       await _saveToStorage();
@@ -364,151 +392,287 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
       _dueDateCtl.clear();
     }
 
-    await showDialog(context: context, builder: (_) {
-      return StatefulBuilder(builder: (context, setStateDialog) {
-        return AlertDialog(
-          scrollable: true,
-          title: Text(_editingId == null ? 'Add Task' : 'Edit Task'),
-          content: Form(
-            key: _formKey,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextFormField(
-                controller: _titleCtl,
-                decoration: const InputDecoration(labelText: 'Task Name'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _dueDateCtl,
-                    readOnly: true,
-                    decoration: const InputDecoration(labelText: 'Due Date', hintText: 'Select'),
-                    onTap: () async {
-                      final now = DateTime.now();
-                      final initial = _pickedDate ?? now;
-                      final picked = await showDatePicker(context: context, initialDate: initial, firstDate: DateTime(now.year - 5), lastDate: DateTime(now.year + 5));
-                      if (picked != null) {
-                        setStateDialog(() {
-                          _pickedDate = DateTime(picked.year, picked.month, picked.day);
-                          _dueDateCtl.text = DateFormat('yyyy-MM-dd').format(_pickedDate!);
-                        });
-                      }
-                    },
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        // Use Padding to let sheet grow above keyboard when it appears
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 150),
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF7F3FA), // subtle paper-like background similar to reference
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 16.0),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // top bar: title + circular close
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _editingId == null ? 'Add Task' : 'Edit Task',
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          // circular close in green (like reference)
+                          InkWell(
+                            onTap: () => Navigator.of(ctx).pop(),
+                            borderRadius: BorderRadius.circular(28),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF059669),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close, color: Colors.white, size: 18),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Form
+                      Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextFormField(
+                              controller: _titleCtl,
+                              decoration: const InputDecoration(
+                                labelText: 'Title',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                              ),
+                              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                            ),
+                            const SizedBox(height: 12),
+
+                            // type + pick date/time button row
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    value: _type,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Type',
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    ),
+                                    items: const [
+                                      DropdownMenuItem(value: 'assignment', child: Text('Assignment')),
+                                      DropdownMenuItem(value: 'study', child: Text('Study')),
+                                      DropdownMenuItem(value: 'project', child: Text('Project')),
+                                      DropdownMenuItem(value: 'exam', child: Text('Exam')),
+                                    ],
+                                    onChanged: (v) => setState(() => _type = v ?? 'assignment'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                // Pick date & time pill
+                                SizedBox(
+                                  width: 160,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final now = DateTime.now();
+                                      final initial = _pickedDate ?? now;
+                                      final picked = await showDatePicker(
+                                        context: context,
+                                        initialDate: initial,
+                                        firstDate: DateTime(now.year - 5),
+                                        lastDate: DateTime(now.year + 5),
+                                      );
+                                      if (picked != null) {
+                                        setState(() {
+                                          _pickedDate = DateTime(picked.year, picked.month, picked.day);
+                                          _dueDateCtl.text = DateFormat('yyyy-MM-dd').format(_pickedDate!);
+                                        });
+                                      }
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF059669),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    icon: const Icon(Icons.calendar_today, size: 16),
+                                    label: Text(_dueDateCtl.text.isEmpty ? 'Pick date' : _dueDateCtl.text, style: const TextStyle(fontSize: 13)),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            // Priority + (placeholder for spacing)
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    value: _priority,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Priority',
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    ),
+                                    items: const [
+                                      DropdownMenuItem(value: 'low', child: Text('Low')),
+                                      DropdownMenuItem(value: 'medium', child: Text('Medium')),
+                                      DropdownMenuItem(value: 'high', child: Text('High')),
+                                    ],
+                                    onChanged: (v) => setState(() => _priority = v ?? 'medium'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                // keep layout stable: visually small helper container (matches ref spacing)
+                                SizedBox(width: 80, child: Container()),
+                              ],
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            TextFormField(
+                              controller: _descCtl,
+                              decoration: const InputDecoration(
+                                labelText: 'Description',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              ),
+                              maxLines: 4,
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Mark completed (compact)
+                            Row(
+                              children: [
+                                Checkbox(value: _completed, onChanged: (v) => setState(() => _completed = v ?? false)),
+                                const SizedBox(width: 8),
+                                const Text('Mark completed', style: TextStyle(fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+
+                            const SizedBox(height: 18),
+
+                            // Bottom action row: Cancel + Save (green pill)
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () => Navigator.of(ctx).pop(),
+                                    style: OutlinedButton.styleFrom(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                    ),
+                                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w700)),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: () {
+                                      if (!_formKey.currentState!.validate()) return;
+                                      if (_pickedDate == null) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Please select a due date')),
+                                        );
+                                        return;
+                                      }
+
+                                      final nowIso = DateTime.now().toIso8601String();
+
+                                      if (_editingId != null) {
+                                        final idx = tasks.indexWhere((t) => t.id == _editingId);
+                                        if (idx != -1) {
+                                          tasks[idx] = Task(
+                                            id: _editingId!,
+                                            title: _titleCtl.text.trim(),
+                                            desc: _descCtl.text.trim(),
+                                            type: _type,
+                                            priority: _priority,
+                                            dueDateIso: DateTime(_pickedDate!.year, _pickedDate!.month, _pickedDate!.day).toIso8601String(),
+                                            progress: _progress,
+                                            completed: _completed,
+                                            createdAtIso: tasks[idx].createdAtIso,
+                                            course: '',
+                                            tags: [],
+                                          );
+                                        }
+                                        _saveToStorage();
+                                        Navigator.of(ctx).pop();
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Task updated')),
+                                        );
+                                        setState(() {});
+                                      } else {
+                                        final id = DateTime.now().millisecondsSinceEpoch + (DateTime.now().microsecond % 1000);
+                                        tasks.add(Task(
+                                          id: id,
+                                          title: _titleCtl.text.trim(),
+                                          desc: _descCtl.text.trim(),
+                                          type: _type,
+                                          priority: _priority,
+                                          dueDateIso: DateTime(_pickedDate!.year, _pickedDate!.month, _pickedDate!.day).toIso8601String(),
+                                          progress: _progress,
+                                          completed: _completed,
+                                          createdAtIso: nowIso,
+                                          course: '',
+                                          tags: [],
+                                        ));
+                                        _saveToStorage();
+                                        Navigator.of(ctx).pop();
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Task added')),
+                                        );
+                                        setState(() {});
+                                      }
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF059669), // emerald green
+                                      foregroundColor: Colors.white, // <-- TEXT COLOR WHITE
+                                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                                      elevation: 6,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      _editingId == null ? 'Add' : 'Save',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16,
+                                        color: Colors.white, // <-- MAKE SURE TEXT IS WHITE
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _type,
-                    decoration: const InputDecoration(labelText: 'Type'),
-                    items: const [
-                      DropdownMenuItem(value: 'assignment', child: Text('Assignment')),
-                      DropdownMenuItem(value: 'study', child: Text('Study')),
-                      DropdownMenuItem(value: 'project', child: Text('Project')),
-                      DropdownMenuItem(value: 'exam', child: Text('Exam')),
-                    ],
-                    onChanged: (v) => setStateDialog(() => _type = v ?? 'assignment'),
-                  ),
-                )
-              ]),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _priority,
-                    decoration: const InputDecoration(labelText: 'Priority'),
-                    items: const [
-                      DropdownMenuItem(value: 'low', child: Text('Low')),
-                      DropdownMenuItem(value: 'medium', child: Text('Medium')),
-                      DropdownMenuItem(value: 'high', child: Text('High')),
-                    ],
-                    onChanged: (v) => setStateDialog(() => _priority = v ?? 'medium'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 140,
-                  child: TextFormField(
-                    initialValue: '$_progress',
-                    decoration: const InputDecoration(labelText: 'Completion %'),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) {
-                      final n = int.tryParse(v) ?? 0;
-                      setStateDialog(() => _progress = n.clamp(0, 100));
-                    },
-                  ),
-                )
-              ]),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descCtl,
-                decoration: const InputDecoration(labelText: 'Description'),
-                maxLines: 3,
               ),
-              const SizedBox(height: 12),
-              Row(children: [
-                Checkbox(value: _completed, onChanged: (v) => setStateDialog(() => _completed = v ?? false)),
-                const SizedBox(width: 8),
-                const Text('Mark completed', style: TextStyle(fontWeight: FontWeight.w700)),
-              ])
-            ]),
+            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop() , child: const Text('Cancel')),
-            ElevatedButton(onPressed: () {
-              if (!_formKey.currentState!.validate()) return;
-              if (_pickedDate == null) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select a due date')));
-                return;
-              }
-              final nowIso = DateTime.now().toIso8601String();
-              if (_editingId != null) {
-                final idx = tasks.indexWhere((t) => t.id == _editingId);
-                if (idx != -1) {
-                  tasks[idx] = Task(
-                    id: _editingId!,
-                    title: _titleCtl.text.trim(),
-                    desc: _descCtl.text.trim(),
-                    type: _type,
-                    priority: _priority,
-                    dueDateIso: DateTime(_pickedDate!.year, _pickedDate!.month, _pickedDate!.day).toIso8601String(),
-                    progress: _progress,
-                    completed: _completed,
-                    createdAtIso: tasks[idx].createdAtIso,
-                    course: '',
-                    tags: [],
-                  );
-                }
-                _saveToStorage();
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Task updated')));
-                setState(() {});
-              } else {
-                final id = DateTime.now().millisecondsSinceEpoch + (DateTime.now().microsecond % 1000);
-                tasks.add(Task(
-                  id: id,
-                  title: _titleCtl.text.trim(),
-                  desc: _descCtl.text.trim(),
-                  type: _type,
-                  priority: _priority,
-                  dueDateIso: DateTime(_pickedDate!.year, _pickedDate!.month, _pickedDate!.day).toIso8601String(),
-                  progress: _progress,
-                  completed: _completed,
-                  createdAtIso: nowIso,
-                  course: '',
-                  tags: [],
-                ));
-                _saveToStorage();
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Task added')));
-                setState(() {});
-              }
-            }, child: const Text('Save Task'))
-          ],
         );
-      });
-    });
+      },
+    );
   }
 
   Future<void> _confirmDelete(Task t) async {
@@ -653,7 +817,7 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                     final t = list[i];
                     return ListTile(
                       title: Text(t.title),
-                      subtitle: Text('${fmtDate(t.dueDateIso)} • ${t.progress}%'),
+                      subtitle: Text('${fmtDate(t.dueDateIso)}'),
                     );
                   },
                 ),
@@ -696,7 +860,7 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
       Widget buildButton(String t, {bool expanded = false}) {
         final label = t[0].toUpperCase() + t.substring(1);
         final active = t == currentTab;
-        final btnBgColor = active ? activeBg : Colors.transparent;
+        final Color btnBgColor = active ? activeBg : Colors.transparent;
         final labelColor = active ? activeText : inactiveText;
 
         final button = TextButton(
@@ -814,12 +978,8 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                 _priorityChip(t.priority),
                 overdue ? Text('${diff.abs()}d overdue', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w700)) : Text('$diff d left', style: const TextStyle(color: Colors.grey)),
                 ...t.tags.take(3).map((tag) => Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(8)), child: Text(tag, style: const TextStyle(fontSize: 12)))),
-
               ]),
               const SizedBox(height: 8),
-              LinearProgressIndicator(value: (t.progress / 100).clamp(0.0, 1.0).toDouble()),
-              const SizedBox(height: 6),
-              Text('${t.progress}% complete', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
             ]),
           ),
           const SizedBox(width: 12),
@@ -828,24 +988,41 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
             width: 56,
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // edit button (stacked)
-                IconButton(
-                  onPressed: () => _openAddDialog(edit: t),
-                  icon: const Icon(Icons.edit, size: 20),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-                  tooltip: 'Edit',
+                // Meetings-style edit circle
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF10B981), Color(0xFF059669)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => _openAddDialog(edit: t),
+                    child: const Icon(Icons.edit, color: Colors.white, size: 18),
+                  ),
                 ),
-                const SizedBox(height: 6),
+
+                // increase gap so delete sits lower (matches reference more closely)
+                const SizedBox(height: 18),
+
+                // red trash slightly lower
                 IconButton(
                   onPressed: () => _confirmDelete(t),
-                  icon: const Icon(Icons.delete, size: 20),
+                  icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(width: 28, height: 28),
                   tooltip: 'Delete',
                 ),
+
                 const SizedBox(height: 6),
+
                 // compact checkbox so it won't expand layout
                 Checkbox(
                   value: t.completed,
@@ -920,6 +1097,39 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
     }
   }
 
+  // small centered green pill used for Show more / Show less under tasks
+  Widget _showMoreTasksPill() {
+    final expanded = _showMoreTasks;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8.0, bottom: 6.0),
+        child: InkWell(
+          onTap: () => setState(() => _showMoreTasks = !_showMoreTasks),
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+              borderRadius: BorderRadius.circular(999),
+              boxShadow: [BoxShadow(color: const Color(0xFF059669).withOpacity(0.12), blurRadius: 8, offset: const Offset(0, 6))],
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              // Animated rotation for icon to match budget_dashboard feel
+              AnimatedRotation(
+                turns: expanded ? 0.5 : 0.0,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOut,
+                child: Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 18, color: Colors.white),
+              ),
+              const SizedBox(width: 8),
+              Text(expanded ? 'Show less' : 'Show more', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = getFilteredSorted();
@@ -928,17 +1138,7 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
 
     // We'll use a Stack so we can position the bottom-right pill group without changing layout.
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-          },
-        ),
-        title: const Text('Planner'),
-        centerTitle: false,
-        // Top-right actions removed (moved to bottom-right pill group)
-      ),
+      // AppBar removed so back button and header do not appear
       body: SafeArea(
         child: Stack(
           children: [
@@ -969,11 +1169,6 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                           onPressed: () => _openAddDialog(),
                           style: _smallPillStyle(filled: true),
                           child: const Text('+ Add Task', style: TextStyle(fontSize: 14)),
-                        ),
-                        OutlinedButton(
-                          onPressed: () => _exportToJson(),
-                          style: _smallPillStyle(filled: false),
-                          child: const Text('Export', style: TextStyle(fontSize: 14)),
                         ),
                         // Responsive 4-cell stats block
                         LayoutBuilder(builder: (ctx, caps) {
@@ -1082,22 +1277,59 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                                   // subtract a small safety margin to prevent "bottom overflowed by 16px"
                                   maxListHeight = (maxListHeight - 16).clamp(120.0, deviceH);
 
-                                  return SizedBox(
-                                    height: maxListHeight,
-                                    child: filtered.isEmpty
-                                        ? const Padding(padding: EdgeInsets.all(18), child: Text('No tasks found.'))
-                                        : ListView.builder(
-                                            shrinkWrap: true,
-                                            physics: const NeverScrollableScrollPhysics(),
-                                            itemCount: filtered.length,
-                                            itemBuilder: (context, i) {
-                                              final t = filtered[i];
-                                              if (timelineView) {
-                                                return _timelineEntry(t);
-                                              }
-                                              return _taskCard(t);
-                                            },
+                                  // compute visible tasks per show-more state
+                                  final visibleTasks = _showMoreTasks ? filtered : filtered.take(_maxVisibleTasks).toList();
+
+                                  // We'll animate height changes with AnimatedSize (so toggling show-more smoothly animates)
+                                  return AnimatedSize(
+                                    duration: const Duration(milliseconds: 280),
+                                    curve: Curves.easeInOut,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        // WHEN COLLAPSED: keep a fixed-height box with scroll inside
+                                        if (!_showMoreTasks)
+                                          SizedBox(
+                                            height: maxListHeight,
+                                            child: filtered.isEmpty
+                                                ? const Padding(padding: EdgeInsets.all(18), child: Text('No tasks found.'))
+                                                : ListView.builder(
+                                                    shrinkWrap: true,
+                                                    physics: const NeverScrollableScrollPhysics(),
+                                                    itemCount: visibleTasks.length,
+                                                    itemBuilder: (context, i) {
+                                                      final t = visibleTasks[i];
+                                                      if (timelineView) {
+                                                        return _timelineEntry(t);
+                                                      }
+                                                      return _taskCard(t);
+                                                    },
+                                                  ),
+                                          )
+                                        else
+                                          // WHEN EXPANDED: allow the list to size to its content but cap its max height to avoid overflow.
+                                          ConstrainedBox(
+                                            constraints: BoxConstraints(maxHeight: (deviceH * 0.9).clamp(200.0, deviceH * 0.95)),
+                                            child: filtered.isEmpty
+                                                ? const Padding(padding: EdgeInsets.all(18), child: Text('No tasks found.'))
+                                                : ListView.builder(
+                                                    shrinkWrap: true,
+                                                    physics: const NeverScrollableScrollPhysics(),
+                                                    itemCount: visibleTasks.length,
+                                                    itemBuilder: (context, i) {
+                                                      final t = visibleTasks[i];
+                                                      if (timelineView) {
+                                                        return _timelineEntry(t);
+                                                      }
+                                                      return _taskCard(t);
+                                                    },
+                                                  ),
                                           ),
+
+                                        // ---- show more pill placed BETWEEN tasks and Upcoming Deadlines ----
+                                        if (filtered.length > _maxVisibleTasks) _showMoreTasksPill(),
+                                      ],
+                                    ),
                                   );
                                 }),
                               ]),
@@ -1118,8 +1350,7 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                                 const SizedBox(height: 18),
                                 const Text('Quick Stats', style: TextStyle(fontWeight: FontWeight.w800)),
                                 const SizedBox(height: 8),
-                                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Avg Completion'), Text('${stats['avg']}%')]),
-                                const SizedBox(height: 6),
+                                // Avg Completion removed as requested
                                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Overdue'), Text('${stats['overdue']}')]),
                                 const SizedBox(height: 18),
                                 ElevatedButton(onPressed: () => _openRecoverModal(), style: _smallPillStyle(filled: true), child: const Text('View Recoverable'))
@@ -1129,6 +1360,8 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                       ]);
                     }),
                     const SizedBox(height: 24),
+
+                    // Narrow layout: Upcoming Deadlines & Quick Stats card (below tasks). For wide (twoCol) layout the right-side box already shows it.
                     if (!isWide)
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -1140,15 +1373,16 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
                           const SizedBox(height: 18),
                           const Text('Quick Stats', style: TextStyle(fontWeight: FontWeight.w800)),
                           const SizedBox(height: 8),
-                          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Avg Completion'), Text('${stats['avg']}%')]),
-                          const SizedBox(height: 6),
+                          // Avg Completion removed as requested
                           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Overdue'), Text('${stats['overdue']}')]),
                           const SizedBox(height: 18),
                           ElevatedButton(onPressed: () => _openRecoverModal(), style: _smallPillStyle(filled: true), child: const Text('View Recoverable'))
                         ]),
                       )
+
                   ]),
                 ),
+
               ]),
             ),
 
@@ -1262,17 +1496,31 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    onPressed: () => _openAddDialog(edit: t),
-                    icon: const Icon(Icons.edit, size: 20),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-                    tooltip: 'Edit',
+                  // Meetings-style edit circle
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF10B981), Color(0xFF059669)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => _openAddDialog(edit: t),
+                      child: const Icon(Icons.edit, color: Colors.white, size: 18),
+                    ),
                   ),
-                  const SizedBox(height: 6),
+
+                  // lower the trash further (matches meetings screenshot)
+                  const SizedBox(height: 18),
+
                   IconButton(
                     onPressed: () => _confirmDelete(t),
-                    icon: const Icon(Icons.delete, size: 20),
+                    icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints.tightFor(width: 28, height: 28),
                     tooltip: 'Delete',
@@ -1346,18 +1594,11 @@ class _PlannerHomePage extends State<PlannerPage> with TickerProviderStateMixin 
             if (diff >= 0)
               Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)), child: Text('$diff d', style: const TextStyle(color: Color(0xFFC2410C)))),
             const SizedBox(height: 8),
-            SizedBox(width: 110, height: 6, child: ClipRRect(borderRadius: BorderRadius.circular(6), child: LinearProgressIndicator(value: (t.progress / 100).clamp(0.0, 1.0).toDouble()))),
+            // progress bar removed per request
           ])
         ]),
       );
     }).toList());
-  }
-
-  // export tasks to clipboard as JSON
-  Future<void> _exportToJson() async {
-    final raw = jsonEncode(tasks.map((t) => t.toMap()).toList());
-    await Clipboard.setData(ClipboardData(text: raw));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('JSON copied to clipboard')));
   }
 
   Future<void> _resetSample() async {

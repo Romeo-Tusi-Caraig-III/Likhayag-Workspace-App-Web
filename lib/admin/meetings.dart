@@ -1,4 +1,4 @@
-// lib/main.dart (or wherever you keep this file)
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; // keep intl: ^0.17.0 in pubspec.yaml
 
@@ -316,59 +316,38 @@ class _MeetingsPageState extends State<MeetingsPage> {
     ),
     Meeting(
       id: '2',
-      title: 'Meeting',
-      type: 'project',
-      purpose: 'Officers Meeting',
-      datetime: DateTime.now().add(const Duration(days: 10)),
-      location: '',
-      meetLink: 'https://meet.example/j/123',
-      status: 'Not Started',
-    ),
-    Meeting(
-      id: '3',
-      title: 'Theatre',
-      type: 'project',
-      purpose: 'Theatre Meeting',
-      datetime: DateTime.now().add(const Duration(days: 15, hours: 2)),
-      location: '',
-      meetLink: 'https://meet.example/j/456',
-      status: 'Not Started',
-    ),
-    // additional sample meetings (if you want to test "more than visible")
-    Meeting(
-      id: '4',
       title: 'Design Sync',
       type: 'project',
       purpose: 'UI review',
-      datetime: DateTime.now().add(const Duration(days: 2)),
+      datetime: DateTime.now().add(const Duration(days: 1)),
       location: 'Room 102',
       status: 'Not Started',
     ),
     Meeting(
-      id: '5',
+      id: '3',
       title: 'Advising Session',
       type: 'advising',
       purpose: 'Advising students',
-      datetime: DateTime.now().add(const Duration(days: 3)),
+      datetime: DateTime.now().add(const Duration(days: 2)),
       location: '',
       meetLink: 'https://meet.example/j/789',
       status: 'Not Started',
     ),
     Meeting(
-      id: '6',
-      title: 'Study Group',
+      id: '4',
+      title: 'Study Group with a very long name that previously wrapped poorly',
       type: 'study group',
       purpose: 'Exam prep',
-      datetime: DateTime.now().add(const Duration(days: 4)),
+      datetime: DateTime.now().add(const Duration(days: 3)),
       location: 'Library',
       status: 'Not Started',
     ),
     Meeting(
-      id: '7',
-      title: 'Extra Meeting',
+      id: '5',
+      title: 'Later Meeting (outside 7 days)',
       type: 'project',
-      purpose: 'Extra',
-      datetime: DateTime.now().add(const Duration(days: 5)),
+      purpose: 'far future',
+      datetime: DateTime.now().add(const Duration(days: 12)),
       location: '',
       status: 'Not Started',
     ),
@@ -411,10 +390,20 @@ class _MeetingsPageState extends State<MeetingsPage> {
     return _meetings.where((m) => m.datetime.isAfter(start) && m.datetime.isBefore(end)).length;
   }
 
+  // _nextUp returns the earliest upcoming (up to 3) meetings but only within the next 7 days.
   List<Meeting> get _nextUp {
-    final upcoming = _meetings.where((m) => m.datetime.isAfter(DateTime.now())).toList();
+    final now = DateTime.now();
+    final cutoff = now.add(const Duration(days: 7));
+    final upcoming = _meetings.where((m) => m.datetime.isAfter(now) && m.datetime.isBefore(cutoff)).toList();
     upcoming.sort((a, b) => a.datetime.compareTo(b.datetime));
     return upcoming.take(3).toList();
+  }
+
+  // NEW: count of meetings within the next 7 days (inclusive from now to now + 7 days)
+  int get _upcoming7DaysCount {
+    final now = DateTime.now();
+    final cutoff = now.add(const Duration(days: 7));
+    return _meetings.where((m) => m.datetime.isAfter(now) && m.datetime.isBefore(cutoff)).length;
   }
 
   void _openAddEditSheet({Meeting? edit}) async {
@@ -488,19 +477,30 @@ class _MeetingsPageState extends State<MeetingsPage> {
     super.dispose();
   }
 
+  /// This is the edited stat tile to match the "Budget" screen 4-square design:
+  /// - soft purple/pale background
+  /// - rounded corners, subtle shadow
+  /// - compact label above bold value
   Widget _buildStatTile(String label, String value, double maxWidth) {
-    final tileWidth = maxWidth.clamp(140.0, 320.0);
+    // keep widths reasonable on narrow screens
+    final tileWidth = maxWidth.clamp(140.0, 340.0);
     return SizedBox(
       width: tileWidth,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-            const SizedBox(height: 6),
-            Text(value, style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w800, fontSize: 18)),
-          ]),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F1FB), // pale purple / lilac background like your reference
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 6)),
+          ],
+          border: Border.all(color: const Color(0xFFFAF7FF)), // very light border to lift it
         ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
+          const SizedBox(height: 8),
+          Text(value, style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w800, fontSize: 18)),
+        ]),
       ),
     );
   }
@@ -521,7 +521,7 @@ class _MeetingsPageState extends State<MeetingsPage> {
             decoration: BoxDecoration(
               gradient: expanded
                   ? LinearGradient(colors: [emeraldEnd.withOpacity(0.98), emeraldStart])
-                  : LinearGradient(colors: [emeraldStart, emeraldEnd]),
+                  : const LinearGradient(colors: [emeraldStart, emeraldEnd]),
               borderRadius: BorderRadius.circular(999),
               boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 6))],
             ),
@@ -536,12 +536,126 @@ class _MeetingsPageState extends State<MeetingsPage> {
     );
   }
 
+  // =========================
+  // New top hero (full-width Next Up) — green gradient matching buttons
+  // - Flexible height (no fixed height) so it won't overflow
+  // - Badge shows count for meetings within next 7 days
+  // - Shows current date
+  // =========================
+  Widget _buildNextUpHero(double width) {
+    final items = _nextUp;
+
+    final leftIconSize = width < 360 ? 52.0 : 64.0;
+    final badgeSize = width < 360 ? 48.0 : 56.0;
+
+    final currentDateText = DateFormat('EEE, MMM d').format(DateTime.now());
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [emeraldStart, emeraldEnd],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.18), blurRadius: 18, offset: const Offset(0, 8))],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Left: icon block (reduced width)
+          Container(
+            width: leftIconSize,
+            height: leftIconSize,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Icon(Icons.schedule, size: leftIconSize * 0.48, color: Colors.white),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // middle: text content (flexible; allows multiple lines)
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Title + current date on same column (current date is subtle)
+                Row(
+                  children: [
+                    const Expanded(child: Text('Next Up', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18))),
+                    Text(currentDateText, style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                if (items.isEmpty)
+                  Text('No upcoming meetings in the next 7 days', style: TextStyle(color: Colors.white.withOpacity(0.95)))
+                else
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: items.map((m) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // small bullet
+                            Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+                            const SizedBox(width: 8),
+                            // allow title to occupy up to 2 lines before truncating
+                            Expanded(
+                              child: Text(
+                                m.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(DateFormat('MMM d').format(m.datetime), style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Right: gradient square badge that matches the green buttons (shows count for next 7 days)
+          Container(
+            width: badgeSize,
+            height: badgeSize,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.18), blurRadius: 8, offset: const Offset(0, 4))],
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('${_upcoming7DaysCount}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  Text('upcoming', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 11)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth;
       final isWide = width >= 920;
-      final searchWidth = (width * 0.55).clamp(120.0, 520.0);
       final statTileMax = (width / (isWide ? 4 : 2)) - 24;
 
       // computed visible meetings based on show-more flag
@@ -549,88 +663,7 @@ class _MeetingsPageState extends State<MeetingsPage> {
       final visible = _showMoreMeetings ? list : list.take(_maxVisibleMeetings).toList();
 
       return Scaffold(
-        appBar: AppBar(
-          titleSpacing: 12,
-          backgroundColor: Colors.white,
-          elevation: 0,
-          title: Row(
-            children: [
-              Expanded(
-                child: Text('Meetings', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 20)),
-              ),
-              // search box: flexible
-              if (width >= 360)
-                SizedBox(
-                  width: searchWidth,
-                  child: SizedBox(
-                    height: 44,
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(Icons.search, color: Colors.black54),
-                        hintText: 'Search meetings...',
-                        filled: true,
-                        fillColor: Colors.grey.shade100,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                      onChanged: (v) {
-                        setState(() {
-                          _search = v;
-                        });
-                      },
-                    ),
-                  ),
-                )
-              else
-                // small screen search uses a dialog; use gradient circular icon
-                GradientIconCircle(
-                  icon: Icons.search,
-                  tooltip: 'Search',
-                  onPressed: () async {
-                    final q = await showDialog<String>(
-                      context: context,
-                      builder: (ctx) {
-                        final t = TextEditingController();
-                        return AlertDialog(
-                          title: const Text('Search meetings'),
-                          content: TextField(controller: t, decoration: const InputDecoration(hintText: 'Search...')),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                            // Use gradient here too
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
-                              child: SizedBox(
-                                width: 90,
-                                child: GradientButton(
-                                  onPressed: () => Navigator.pop(ctx, t.text),
-                                  child: const Text('Search'),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-                    if (q != null) {
-                      setState(() {
-                        _search = q;
-                        _searchController.text = q;
-                      });
-                    }
-                  },
-                ),
-              // schedule button only on wide screens; else use pill-FAB
-              if (!_useFabForSchedule(width))
-                Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: GradientIconButton(icon: Icons.add, label: 'Schedule', onPressed: () => _openAddEditSheet()),
-                ),
-            ],
-          ),
-        ),
-        // NOTE: replace circular FAB on narrow screens with pill-style "Add Meeting"
+        // header removed (you requested no header) — start content from body
         floatingActionButton: _useFabForSchedule(width)
             ? GradientPillFab(
                 onPressed: () => _openAddEditSheet(),
@@ -640,15 +673,61 @@ class _MeetingsPageState extends State<MeetingsPage> {
             : null,
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         body: SafeArea(
-          // Make the entire middle area scrollable
           child: SingleChildScrollView(
             physics: const ClampingScrollPhysics(),
             padding: EdgeInsets.symmetric(horizontal: width < 480 ? 12 : 16, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Schedule and manage your meetings', style: TextStyle(color: Colors.grey.shade600)),
+                // NEW: Next-Up hero at the top (green gradient)
+                _buildNextUpHero(width),
+                const SizedBox(height: 14),
+
+                // Lightweight search row (keeps search available)
+                SizedBox(
+                  height: 44,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.search, size: 20, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            decoration: const InputDecoration(
+                              hintText: 'Search meetings...',
+                              border: InputBorder.none,
+                              isCollapsed: true,
+                            ),
+                            style: const TextStyle(fontSize: 14),
+                            onChanged: (v) {
+                              setState(() {
+                                _search = v;
+                              });
+                            },
+                          ),
+                        ),
+                        if (_searchController.text.isNotEmpty)
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _searchController.clear();
+                                _search = '';
+                              });
+                            },
+                            child: Icon(Icons.close, size: 18, color: Colors.black45),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 12),
+
                 // Stats row: use Wrap so tiles wrap on small screens and center them
                 Wrap(
                   spacing: 12,
@@ -663,19 +742,16 @@ class _MeetingsPageState extends State<MeetingsPage> {
                 ),
                 const SizedBox(height: 12),
 
-                // MAIN CONTENT: meetings list + side card
-                // For wide screens we render a Row; for narrow screens just a Column
+                // MAIN CONTENT: meetings list (bottom Next Up card removed)
                 if (isWide)
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    // LEFT: meetings column (non-scrollable, but page scrolls)
+                    // LEFT: meetings column
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Meetings header
                           const Text('Meetings', style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
-                          // the meetings column (fixed - no internal scroll)
                           ...visible.map((m) => Padding(
                                 padding: const EdgeInsets.only(bottom: 8.0),
                                 child: MeetingCard(
@@ -701,12 +777,9 @@ class _MeetingsPageState extends State<MeetingsPage> {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    // RIGHT: next up / stats column
-                    SizedBox(width: 320, child: _nextUpCard(width, isWide)),
+                    // Note: right-side Next Up card removed per your request
                   ])
                 else
-                  // Narrow layout: stacked vertically (page scrolls)
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -735,7 +808,7 @@ class _MeetingsPageState extends State<MeetingsPage> {
                           child: Text('Showing ${_maxVisibleMeetings} of ${list.length} meetings', style: TextStyle(color: Colors.grey.shade600)),
                         ),
                       const SizedBox(height: 12),
-                      _nextUpCard(width, isWide),
+                      // bottom Next Up card intentionally removed
                     ],
                   ),
                 const SizedBox(height: 24),
@@ -745,40 +818,6 @@ class _MeetingsPageState extends State<MeetingsPage> {
         ),
       );
     });
-  }
-
-  // NOTE: accept isWide to decide how to size the widget
-  Widget _nextUpCard(double width, bool isWide) {
-    final child = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Next Up', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          if (_nextUp.isEmpty)
-            Text('No upcoming meetings', style: TextStyle(color: Colors.grey.shade600))
-          else
-            Column(
-              children: _nextUp
-                  .map((m) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12.0),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(m.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 4),
-                          Text(_displayFormat.format(m.datetime), style: TextStyle(color: Colors.grey.shade600)),
-                        ]),
-                      ))
-                  .toList(),
-            ),
-        ]),
-      ),
-    );
-
-    if (isWide) {
-      return child;
-    } else {
-      return SizedBox(width: double.infinity, child: child);
-    }
   }
 }
 
@@ -864,7 +903,7 @@ class MeetingCard extends StatelessWidget {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text(meeting.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Flexible(child: Text(meeting.title, style: const TextStyle(fontWeight: FontWeight.w700))),
                       // replace edit icon with small gradient circle
                       GradientIconCircle(icon: Icons.edit, tooltip: 'Edit', onPressed: onEdit),
                     ]),

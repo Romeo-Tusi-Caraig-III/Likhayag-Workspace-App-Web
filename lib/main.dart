@@ -1,30 +1,28 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart'; // <<-- add this import
+import 'package:flutter/rendering.dart';
+
+// ADMIN SCREENS
 import 'admin/admin_dashboard.dart';
 import 'admin/planner_dashboard.dart';
-import 'auth/login.dart';
-import 'auth/signup.dart';
 import 'admin/calendar.dart';
 import 'admin/profile.dart';
 import 'admin/meetings.dart';
-import 'admin/budget.dart'; // <-- new import
+import 'admin/budget.dart';
 
+// AUTH SCREENS
+import 'login.dart';
+import 'auth/signup.dart';
 
+// NEW NAVIGATION SYSTEM
+import 'admin/root_scaffold..dart';
 
-void main() {  WidgetsFlutterBinding.ensureInitialized();
-  // Disable debug overflow banners
-    WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // Disable the yellow/black overflow debug banners in debug mode.
   debugPaintSizeEnabled = false;
 
   runApp(const MyApp());
-
-  debugPaintSizeEnabled = false;
-  runApp(const MyApp());
-  runApp(const MyApp());
-  
 }
 
 class MyApp extends StatelessWidget {
@@ -33,26 +31,29 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Student Hub',
+      title: 'Likhayag',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.teal,
         useMaterial3: true,
       ),
 
-      // Start on Login Page
       initialRoute: '/login',
 
       routes: {
-        '/login': (context) => const LoginPage(),
-        '/signup': (context) => const SignUpPage(),
-        '/dashboard': (context) => const DashboardPage(),
-        '/planner': (context) => const PlannerPage(),
-        '/calendar': (context) => const CalendarPage(),
+        '/login': (context) => LoginPage(),
+        '/signup': (context) => SignUpPage(),
+
+        // When the user logs in successfully → go to this
+        '/home': (context) => RootScaffoldWithStylishNav(),
+
+        '/dashboard': (context) => DashboardPage(),
+        '/planner': (context) => PlannerPage(),
+        '/calendar': (context) => CalendarPage(),
         '/profile': (context) => ProfilePage(),
         '/meetings': (context) => MeetingsPage(),
-        '/budget': (context) => const BudgetPage(), // <-- new route
-      }
+        '/budget': (context) => BudgetPage(),
+      },
     );
   }
 }
