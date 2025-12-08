@@ -4,12 +4,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 // ADMIN SCREENS
 import 'admin/admin_dashboard.dart';
-import 'admin/planner_dashboard.dart';
-import 'admin/calendar.dart';
+import 'admin/planner_dashboard.dart' as planner;
+import 'admin/calendar.dart' as calendar;
 import 'admin/profile.dart';
 import 'admin/meetings.dart';
 import 'admin/budget.dart';
-import 'admin/root_scaffold..dart';
+import 'admin/root_scaffold.dart';
 
 // USER SCREENS
 import 'user/user_root_scaffold.dart';
@@ -56,8 +56,8 @@ class MyApp extends StatelessWidget {
         // ADMIN ROUTES (unchanged)
         '/admin/home': (context) => const RootScaffoldWithStylishNav(),
         '/dashboard': (context) => DashboardPage(),
-        '/planner': (context) => PlannerPage(),
-        '/calendar': (context) => CalendarPage(),
+        '/planner': (context) => const planner.PlannerPage(),
+        '/calendar': (context) => const calendar.PlannerPage(),
         '/profile': (context) => ProfilePage(),
         '/meetings': (context) => MeetingsPage(),
         '/budget': (context) => BudgetPage(),

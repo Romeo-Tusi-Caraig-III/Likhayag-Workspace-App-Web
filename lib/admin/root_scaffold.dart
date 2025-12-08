@@ -1,13 +1,14 @@
 // lib/admin/root_scaffold.dart
 import 'package:flutter/material.dart';
-
+import 'budget.dart';
 import 'admin_dashboard.dart';
 import 'planner_dashboard.dart';
 import 'calendar.dart';
 import 'profile.dart';
 import 'meetings.dart';
 import 'budget.dart';
-
+import 'planner_dashboard.dart' as planner;
+import 'calendar.dart' as calendar;
 class RootScaffoldWithStylishNav extends StatefulWidget {
   const RootScaffoldWithStylishNav({Key? key}) : super(key: key);
 
@@ -24,8 +25,8 @@ class _RootScaffoldWithStylishNavState
   // when the navigation order is changed.
   final List<Widget> _pages = <Widget>[
     KeyedSubtree(key: ValueKey('page_dashboard'), child: DashboardPage()),
-    KeyedSubtree(key: ValueKey('page_calendar'), child: CalendarPage()),
-    KeyedSubtree(key: ValueKey('page_planner'), child: PlannerPage()),
+    KeyedSubtree(key: ValueKey('page_calendar'), child: const calendar.PlannerPage()),
+    KeyedSubtree(key: ValueKey('page_planner'), child: const planner.PlannerPage()),
     KeyedSubtree(key: ValueKey('page_budget'), child: BudgetPage()),
     KeyedSubtree(key: ValueKey('page_meetings'), child: MeetingsPage()),
     KeyedSubtree(key: ValueKey('page_profile'), child: ProfilePage()),

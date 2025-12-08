@@ -3,10 +3,10 @@
 LIKHAYAG MOBILE API - Flask Backend
 ================================================================================
 Complete mobile-focused API with JWT authentication
-Merged, cleaned, and organized for mobile applications only
+FULLY FIXED VERSION with functools import and no duplicate decorators
 
 Author: Likhayag Development Team
-Version: 3.0 (Mobile-Only - Final)
+Version: 3.1 (Mobile-Only - Fixed)
 Last Updated: December 2025
 ================================================================================
 """
@@ -21,6 +21,7 @@ import uuid
 import jwt
 import re
 import io
+import functools  # ✅ FIXED: Added functools import
 from functools import wraps
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
@@ -59,7 +60,6 @@ JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_HOURS = 720  # 30 days
 
 # ---------- CORS Configuration ----------
-# Allow all origins for mobile apps
 CORS(app, 
      supports_credentials=True,
      origins='*',
@@ -93,9 +93,9 @@ SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 
 # ---------- 2FA Configuration ----------
-CODE_TTL = int(os.getenv('CODE_TTL', 300))  # 5 minutes
-SEND_LIMIT_WINDOW = int(os.getenv('SEND_LIMIT_WINDOW', 3600))  # 1 hour
-SEND_LIMIT_COUNT = int(os.getenv('SEND_LIMIT_COUNT', 5))  # Max 5 codes per hour
+CODE_TTL = int(os.getenv('CODE_TTL', 300))
+SEND_LIMIT_WINDOW = int(os.getenv('SEND_LIMIT_WINDOW', 3600))
+SEND_LIMIT_COUNT = int(os.getenv('SEND_LIMIT_COUNT', 5))
 
 # ---------- Global Variables ----------
 _supabase_client = None
@@ -202,20 +202,14 @@ def admin_required(f):
         return f(*args, **kwargs)
     
     return wrap
+
+
 # ================================================================================
 # SECTION 5: SUPABASE DATABASE HELPERS
 # ================================================================================
 
 def get_supabase():
-    """
-    Get or create Supabase client singleton
-    
-    Returns:
-        Client: Supabase client instance
-    
-    Raises:
-        RuntimeError: If Supabase not available or not configured
-    """
+    """Get or create Supabase client singleton"""
     global _supabase_client
     if _supabase_client is not None:
         return _supabase_client
@@ -229,16 +223,7 @@ def get_supabase():
 
 
 def safe_execute(query, operation_name='database operation'):
-    """
-    Execute Supabase query with comprehensive error handling
-    
-    Args:
-        query: Supabase query object
-        operation_name (str): Description of operation for logging
-    
-    Returns:
-        tuple: (success: bool, data: any, error: str)
-    """
+    """Execute Supabase query with comprehensive error handling"""
     try:
         response = query.execute()
         if hasattr(response, 'error') and response.error:
@@ -252,16 +237,7 @@ def safe_execute(query, operation_name='database operation'):
 
 
 def fetch_one(table_name: str, **filters):
-    """
-    Fetch single record from table by filters
-    
-    Args:
-        table_name (str): Name of database table
-        **filters: Column=value filters
-    
-    Returns:
-        dict: Record if found, None otherwise
-    """
+    """Fetch single record from table by filters"""
     try:
         sb = get_supabase()
         query = sb.table(table_name).select('*')
@@ -274,20 +250,14 @@ def fetch_one(table_name: str, **filters):
     except Exception as e:
         logger.exception(f'fetch_one error: {e}')
         return None
+
+
 # ================================================================================
 # SECTION 6: FILE UPLOAD HELPERS
 # ================================================================================
 
 def allowed_file(filename):
-    """
-    Check if file extension is allowed
-    
-    Args:
-        filename (str): Filename to check
-    
-    Returns:
-        bool: True if extension is allowed
-    """
+    """Check if file extension is allowed"""
     if not filename:
         return False
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
@@ -295,19 +265,7 @@ def allowed_file(filename):
 
 
 def save_uploaded_file(file_storage, bucket_name):
-    """
-    Save uploaded file to Supabase storage with unique filename
-    
-    Args:
-        file_storage: FileStorage object from request
-        bucket_name (str): Supabase storage bucket name
-    
-    Returns:
-        str: Unique filename in storage
-    
-    Raises:
-        ValueError: If no file or invalid file type
-    """
+    """Save uploaded file to Supabase storage"""
     if not file_storage or file_storage.filename == '':
         raise ValueError("No file provided")
     filename = secure_filename(file_storage.filename)
@@ -328,16 +286,7 @@ def save_uploaded_file(file_storage, bucket_name):
 
 
 def get_receipt_url(filename, expires_seconds=3600):
-    """
-    Get signed URL for file in receipt bucket
-    
-    Args:
-        filename (str): Filename in storage
-        expires_seconds (int): URL expiration time
-    
-    Returns:
-        str: Signed URL or None if failed
-    """
+    """Get signed URL for file in receipt bucket"""
     if not filename:
         return None
     try:
@@ -354,17 +303,7 @@ def get_receipt_url(filename, expires_seconds=3600):
 # ================================================================================
 
 def send_via_smtp(recipient_email, subject, html):
-    """
-    Send email via SMTP
-    
-    Args:
-        recipient_email (str): Recipient email address
-        subject (str): Email subject
-        html (str): HTML email body
-    
-    Returns:
-        bool: True if sent successfully
-    """
+    """Send email via SMTP"""
     from_addr = SMTP_EMAIL or 'no-reply@example.com'
     msg = MIMEText(html, _subtype='html')
     msg['Subject'] = subject
@@ -391,16 +330,7 @@ def send_via_smtp(recipient_email, subject, html):
 
 
 def send_otp_email(recipient_email, code):
-    """
-    Send OTP verification email with branded template
-    
-    Args:
-        recipient_email (str): Recipient email address
-        code (str): 6-digit verification code
-    
-    Returns:
-        bool: True if sent successfully
-    """
+    """Send OTP verification email"""
     subject = 'Your Likhayag Verification Code'
     html = f"""
     <html>
@@ -427,17 +357,7 @@ def send_otp_email(recipient_email, code):
 # ================================================================================
 
 def store_code(email, code, user_id=None):
-    """
-    Store 2FA verification code in database
-    
-    Args:
-        email (str): User email
-        code (str): 6-digit verification code
-        user_id: Optional user ID
-    
-    Returns:
-        bool: True if stored successfully
-    """
+    """Store 2FA verification code"""
     try:
         email = email.strip().lower()
         sb = get_supabase()
@@ -456,15 +376,7 @@ def store_code(email, code, user_id=None):
 
 
 def get_stored_code(email):
-    """
-    Retrieve valid 2FA code for email
-    
-    Args:
-        email (str): User email
-    
-    Returns:
-        str: Valid code if found and not expired, None otherwise
-    """
+    """Retrieve valid 2FA code"""
     try:
         email = email.strip().lower()
         sb = get_supabase()
@@ -476,7 +388,6 @@ def get_stored_code(email):
         row = data[0]
         expires_at = row.get('expires_at')
         
-        # Parse expiration datetime
         if isinstance(expires_at, str):
             expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
         elif isinstance(expires_at, datetime):
@@ -487,7 +398,6 @@ def get_stored_code(email):
         if expires_dt.tzinfo is None:
             expires_dt = expires_dt.replace(tzinfo=timezone.utc)
             
-        # Check if expired
         if datetime.now(timezone.utc) > expires_dt:
             return None
             
@@ -498,15 +408,7 @@ def get_stored_code(email):
 
 
 def delete_stored_code(email):
-    """
-    Delete all 2FA codes for email
-    
-    Args:
-        email (str): User email
-    
-    Returns:
-        bool: True if deleted successfully
-    """
+    """Delete all 2FA codes for email"""
     try:
         email = email.strip().lower()
         sb = get_supabase()
@@ -517,15 +419,7 @@ def delete_stored_code(email):
 
 
 def can_send_code(email):
-    """
-    Check if user can send another 2FA code (rate limiting)
-    
-    Args:
-        email (str): User email
-    
-    Returns:
-        bool: True if user can send another code
-    """
+    """Check rate limiting for 2FA"""
     now_ts = int(datetime.now(timezone.utc).timestamp())
     if not hasattr(app, '_send_hist'):
         app._send_hist = {}
@@ -545,28 +439,7 @@ def can_send_code(email):
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
-    """
-    User login endpoint
-    
-    Request Body:
-        {
-            "email": "user@gmail.com",
-            "password": "password123"
-        }
-    
-    Response:
-        {
-            "success": true,
-            "message": "Login successful",
-            "token": "jwt_token_here",
-            "user": {
-                "id": 1,
-                "name": "John Doe",
-                "email": "user@gmail.com",
-                "role": "user"
-            }
-        }
-    """
+    """User login endpoint"""
     data = request.get_json(silent=True) or request.form.to_dict()
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
@@ -612,46 +485,7 @@ def api_login():
 
 @app.route('/api/signup', methods=['POST'])
 def api_signup():
-    """
-    User signup endpoint with 2FA verification
-    
-    Request Body (without code - creates unverified account):
-        {
-            "first_name": "John",
-            "last_name": "Doe",
-            "middle_name": "M",  // optional
-            "suffix": "Jr",      // optional
-            "email": "user@gmail.com",
-            "password": "password123!",
-            "confirmPassword": "password123!",
-            "role": "user"       // optional, defaults to "user"
-        }
-    
-    Request Body (with code - creates verified account and returns token):
-        {
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "user@gmail.com",
-            "password": "password123!",
-            "confirmPassword": "password123!",
-            "code": "ABC123"     // 2FA verification code
-        }
-    
-    Response (without code):
-        {
-            "success": true,
-            "message": "Account created. Please verify your email.",
-            "user_id": 1
-        }
-    
-    Response (with code):
-        {
-            "success": true,
-            "message": "Account created successfully",
-            "token": "jwt_token_here",
-            "user": {...}
-        }
-    """
+    """User signup endpoint"""
     data = request.get_json(silent=True) or request.form.to_dict()
     
     first = (data.get('first_name') or '').strip()
@@ -782,15 +616,7 @@ def api_signup():
 
 @app.route('/api/logout', methods=['GET', 'POST'])
 def api_logout():
-    """
-    Logout endpoint (token handled client-side)
-    
-    Response:
-        {
-            "success": true,
-            "message": "Logged out"
-        }
-    """
+    """Logout endpoint"""
     return json_response(True, "Logged out")
 
 
@@ -800,20 +626,7 @@ def api_logout():
 
 @app.route('/api/2fa/send', methods=['POST'])
 def api_2fa_send():
-    """
-    Send 2FA verification code to email
-    
-    Request Body:
-        {
-            "email": "user@gmail.com"
-        }
-    
-    Response:
-        {
-            "success": true,
-            "message": "Code sent"
-        }
-    """
+    """Send 2FA verification code"""
     data = request.get_json(silent=True) or request.form.to_dict()
     email = (data.get('email') or '').strip().lower()
     
@@ -865,7 +678,6 @@ def api_2fa_verify():
         
         user = user_data[0]
         
-        # Mark verified
         safe_execute(
             sb.table('users').update({'two_fa_verified': True}).eq('id', user['id']),
             'verify_user'
@@ -880,65 +692,18 @@ def api_2fa_verify():
 
 @app.route('/api/2fa/resend', methods=['POST'])
 def api_2fa_resend():
-    """
-    Resend 2FA code (same as /api/2fa/send)
-    
-    Request Body:
-        {
-            "email": "user@gmail.com"
-        }
-    
-    Response:
-        {
-            "success": true,
-            "message": "Code sent"
-        }
-    """
+    """Resend 2FA code"""
     return api_2fa_send()
+
 
 # ================================================================================
 # SECTION 11: PROFILE ENDPOINTS
 # ================================================================================
+
 @app.route('/api/profile', methods=['GET'])
 @token_required
 def api_get_profile():
-    """
-    Get current user's profile
-    
-    Headers:
-        Authorization: Bearer {token}
-    
-    Response:
-        {
-            "profile": {
-                "firstName": "John",
-                "lastName": "Doe",
-                "middleName": "M",
-                "suffix": "Jr",
-                "email": "user@gmail.com",
-                "status": "Active Student",
-                "profilePicture": "url"
-            },
-            "academic": {
-                "school": "ABC High School",
-                "strand": "STEM",
-                "gradeLevel": "12",
-                "schoolYear": "2024-2025",
-                "lrn": "123456789",
-                "adviserSection": "12-A"
-            },
-            "personal": {
-                "phone": "+639123456789",
-                "dob": "2000-01-01",
-                "address": "123 Main St",
-                "emergency": "+639987654321"
-            },
-            "settings": {
-                "emailNotifications": true,
-                "twoFactor": false
-            }
-        }
-    """
+    """Get current user's profile"""
     try:
         user_id = request.user_data['user_id']
         user = fetch_one('users', id=user_id)
@@ -984,35 +749,7 @@ def api_get_profile():
 @app.route('/api/profile', methods=['PATCH'])
 @token_required
 def api_update_profile():
-    """
-    Update user profile
-    
-    Headers:
-        Authorization: Bearer {token}
-    
-    Request Body:
-        {
-            "section": "profile" | "academic" | "personal" | "settings",
-            "fields": {
-                // Fields to update based on section
-            }
-        }
-    
-    Example - Update profile:
-        {
-            "section": "profile",
-            "fields": {
-                "firstName": "John",
-                "lastName": "Doe"
-            }
-        }
-    
-    Response:
-        {
-            "success": true,
-            "message": "Profile updated"
-        }
-    """
+    """Update user profile"""
     try:
         user_id = request.user_data['user_id']
         data = request.get_json() or {}
@@ -1025,7 +762,6 @@ def api_update_profile():
         sb = get_supabase()
         update_data = {}
         
-        # Map fields by section
         if section == 'profile':
             field_map = {
                 'firstName': 'first_name',
@@ -1038,7 +774,6 @@ def api_update_profile():
                 if key in fields:
                     update_data[db_col] = fields[key]
             
-            # Update display name
             if any(k in fields for k in ['firstName', 'lastName', 'middleName', 'suffix']):
                 user = fetch_one('users', id=user_id)
                 first = fields.get('firstName', user.get('first_name', ''))
@@ -1096,7 +831,7 @@ def api_update_profile():
             return json_response(False, f'Failed: {error}', 500)
         
         return json_response(True, 'Profile updated', 200)
-        
+    
     except Exception:
         logger.exception('Update profile error')
         return json_response(False, 'Server error', 500)
@@ -1105,23 +840,7 @@ def api_update_profile():
 @app.route('/api/profile/picture', methods=['POST'])
 @token_required
 def api_upload_profile_picture():
-    """
-    Upload profile picture
-    
-    Headers:
-        Authorization: Bearer {token}
-        Content-Type: multipart/form-data
-    
-    Form Data:
-        profile_picture: File (image)
-    
-    Response:
-        {
-            "success": true,
-            "message": "Profile picture updated",
-            "picture_url": "https://..."
-        }
-    """
+    """Upload profile picture"""
     try:
         user_id = request.user_data['user_id']
         
@@ -1133,10 +852,8 @@ def api_upload_profile_picture():
         if not file or file.filename == '':
             return json_response(False, 'No file selected', 400)
         
-        # Process image
         image = Image.open(file)
         
-        # Convert to RGB
         if image.mode in ('RGBA', 'LA', 'P'):
             background = Image.new('RGB', image.size, (255, 255, 255))
             if image.mode == 'P':
@@ -1145,33 +862,26 @@ def api_upload_profile_picture():
                 background.paste(image, mask=image.split()[-1])
             image = background
         
-        # Resize to 800x800
         image.thumbnail((800, 800), Image.Resampling.LANCZOS)
         
-        # Save to bytes
         output = io.BytesIO()
         image.save(output, format='JPEG', quality=85)
         output.seek(0)
         
-        # Upload to Supabase
         unique_filename = f"profile_{user_id}_{uuid.uuid4().hex}.jpg"
         sb = get_supabase()
         
-        # Get old picture
         user = fetch_one('users', id=user_id)
         old_picture = user.get('profile_picture') if user else None
         
-        # Upload new
         sb.storage.from_(SUPABASE_PROFILE_BUCKET).upload(
             unique_filename, 
             output.read(),
             file_options={"content-type": "image/jpeg"}
         )
         
-        # Get URL
         picture_url = sb.storage.from_(SUPABASE_PROFILE_BUCKET).get_public_url(unique_filename)
         
-        # Update user
         success, _, error = safe_execute(
             sb.table('users').update({'profile_picture': picture_url}).eq('id', user_id),
             'update_profile_picture'
@@ -1181,7 +891,6 @@ def api_upload_profile_picture():
             sb.storage.from_(SUPABASE_PROFILE_BUCKET).remove([unique_filename])
             return json_response(False, 'Failed to update profile', 500)
         
-        # Delete old
         if old_picture:
             try:
                 old_filename = old_picture.split('/')[-1]
@@ -1203,27 +912,8 @@ def api_upload_profile_picture():
 @app.route('/api/tasks', methods=['GET', 'POST'])
 @token_required
 def api_tasks():
-    """
-    GET - List all tasks with filters
-    POST - Create new task
-    
-    GET Query Parameters:
-        - search: Search in title/notes
-        - filter: all | pending | completed | high
-        - sort: due | priority | created
-    
-    POST Request Body:
-        {
-            "title": "Complete assignment",
-            "due": "2025-12-15",
-            "priority": "high" | "medium" | "low",
-            "notes": "Description",
-            "type": "assignment" | "project" | "exam",
-            "progress": 0-100
-        }
-    """
+    """GET - List tasks, POST - Create task"""
     sb = get_supabase()
-    
     if request.method == 'GET':
         try:
             search = request.args.get('search', '').strip()
@@ -1238,7 +928,6 @@ def api_tasks():
             
             tasks = data or []
             
-            # Apply filters
             if search:
                 tasks = [t for t in tasks if search.lower() in (t.get('title', '') + t.get('notes', '')).lower()]
             
@@ -1249,7 +938,6 @@ def api_tasks():
             elif filter_by == 'high':
                 tasks = [t for t in tasks if t.get('priority') == 'high']
             
-            # Sort
             if sort_by == 'due':
                 tasks.sort(key=lambda x: (x.get('due') is None, x.get('due') or ''))
             elif sort_by == 'priority':
@@ -1258,7 +946,6 @@ def api_tasks():
             else:
                 tasks.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             
-            # Serialize
             serialized = [{
                 'id': str(t.get('id')),
                 'title': t.get('title'),
@@ -1277,7 +964,7 @@ def api_tasks():
             logger.exception('Get tasks error')
             return jsonify([])
     
-    # POST - Create task
+    # POST
     data = request.get_json() or {}
     title = data.get('title', '').strip()
     
@@ -1316,21 +1003,8 @@ def api_tasks():
 @app.route('/api/tasks/<task_id>', methods=['GET', 'PATCH', 'DELETE'])
 @token_required
 def api_task_item(task_id):
-    """
-    GET - Get single task
-    PATCH - Update task
-    DELETE - Delete task
-    
-    PATCH Request Body:
-        {
-            "title": "New title",
-            "priority": "high",
-            "completed": true,
-            // Any task fields
-        }
-    """
+    """Single task operations"""
     sb = get_supabase()
-    
     if request.method == 'GET':
         task = fetch_one('tasks', id=task_id)
         if not task:
@@ -1351,7 +1025,7 @@ def api_task_item(task_id):
             logger.exception('Delete task error')
             return json_response(False, 'Server error', 500)
     
-    # PATCH - Update
+    # PATCH
     data = request.get_json() or {}
     allowed = {}
     
@@ -1376,69 +1050,58 @@ def api_task_item(task_id):
 
 
 # ================================================================================
-# SECTION 13: MEETINGS API
+# SECTION 13: MEETINGS API (FIXED - NO DUPLICATE DECORATORS)
 # ================================================================================
 
 @app.route('/api/meetings', methods=['GET', 'POST'])
 @token_required
 def api_meetings():
-    """
-    GET - List all meetings
-    POST - Create new meeting
-    
-    POST Request Body:
-        {
-            "title": "Team Meeting",
-            "type": "Team" | "One-on-One" | "All-Hands",
-            "purpose": "Discussion",
-            "datetime": "2025-12-15T10:00:00",
-            "location": "Room 101",
-            "meetLink": "https://meet.google.com/...",
-            "attendees": ["user1@gmail.com", "user2@gmail.com"]
-        }
-    """
+    """GET - List meetings, POST - Create meeting (admin only)"""
     sb = get_supabase()
-    
     if request.method == 'GET':
         try:
+            current_user = request.user_data
+            user_email = current_user.get('email')
+            user_role = (current_user.get('role', '')).lower()
+            
+            if not user_email:
+                return json_response(False, 'User email not found in token', 401)
+            
             success, data, _ = safe_execute(
-                sb.table('meetings').select('*').order('datetime'),
+                sb.table('meetings').select('*').order('datetime', desc=False),
                 'get_meetings'
             )
+            
             if not success:
                 return jsonify([])
             
-            meetings = []
-            for m in (data or []):
-                attendees = []
-                attendees_str = m.get('attendees')
-                if attendees_str:
-                    try:
-                        if isinstance(attendees_str, str):
-                            attendees = json.loads(attendees_str)
-                        elif isinstance(attendees_str, list):
-                            attendees = attendees_str
-                    except Exception:
-                        pass
-                
-                meetings.append({
-                    'id': m.get('id'),
-                    'title': m.get('title'),
-                    'type': m.get('type'),
-                    'purpose': m.get('purpose', ''),
-                    'datetime': m.get('datetime'),
-                    'location': m.get('location', ''),
-                    'meetLink': m.get('meet_link', ''),
-                    'status': m.get('status', 'Not Started'),
-                    'attendees': attendees
-                })
+            all_meetings = data or []
+            
+            if user_role in ('admin', 'administrator', 'superuser'):
+                filtered_meetings = all_meetings
+            else:
+                filtered_meetings = [
+                    meeting for meeting in all_meetings 
+                    if user_is_attendee(meeting, user_email)
+                ]
+            
+            meetings = [serialize_meeting(r) for r in filtered_meetings]
+            
+            logger.info(f'User {user_email} ({user_role}) retrieved {len(meetings)} meetings')
             
             return jsonify(meetings)
+            
         except Exception:
             logger.exception('Get meetings error')
             return jsonify([])
     
     # POST
+    current_user = request.user_data
+    user_role = (current_user.get('role', '')).lower()
+    
+    if user_role not in ('admin', 'administrator', 'superuser'):
+        return json_response(False, 'Only admins can create meetings', 403)
+    
     data = request.get_json() or {}
     title = data.get('title', '').strip()
     datetime_str = data.get('datetime')
@@ -1447,11 +1110,19 @@ def api_meetings():
         return json_response(False, 'Title and datetime required', 400)
     
     try:
+        try:
+            dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+        except Exception:
+            try:
+                dt = datetime.strptime(datetime_str, '%Y-%m-%dT%H:%M')
+            except Exception:
+                return json_response(False, 'Invalid datetime format', 400)
+        
         payload = {
             'title': title,
             'type': data.get('type', ''),
             'purpose': data.get('purpose', ''),
-            'datetime': datetime_str,
+            'datetime': dt.isoformat(),
             'location': data.get('location', ''),
             'meet_link': data.get('meetLink', ''),
             'status': 'Not Started',
@@ -1466,66 +1137,185 @@ def api_meetings():
         if not success or not created:
             return json_response(False, f'Failed: {error}', 500)
         
-        return json_response(True, 'Meeting created', 201, meeting=created[0])
+        return json_response(True, 'Meeting created', 201, meeting=serialize_meeting(created[0]))
+        
     except Exception:
         logger.exception('Create meeting error')
         return json_response(False, 'Server error', 500)
 
 
-@app.route('/api/meetings/<int:meeting_id>', methods=['GET', 'PATCH', 'DELETE'])
+@app.route('/api/meetings/<meeting_id>', methods=['GET', 'PATCH', 'DELETE'])
 @token_required
 def api_meeting_item(meeting_id):
-    """
-    GET - Get single meeting
-    PATCH - Update meeting
-    DELETE - Delete meeting
-    """
+    """Single meeting operations"""
     sb = get_supabase()
+    try:
+        meeting_id_int = int(meeting_id)
+    except (ValueError, TypeError):
+        return json_response(False, 'Invalid meeting ID', 400)
     
     if request.method == 'GET':
-        meeting = fetch_one('meetings', id=meeting_id)
+        meeting = fetch_one('meetings', id=meeting_id_int)
         if not meeting:
             return json_response(False, 'Not found', 404)
-        return jsonify(meeting)
+        
+        current_user = request.user_data
+        user_email = current_user.get('email')
+        user_role = (current_user.get('role', '')).lower()
+        
+        if user_role not in ('admin', 'administrator', 'superuser') and user_email:
+            if not user_is_attendee(meeting, user_email):
+                return json_response(False, 'Access denied', 403)
+        
+        return jsonify(serialize_meeting(meeting))
     
     if request.method == 'DELETE':
+        current_user = request.user_data
+        user_role = (current_user.get('role', '')).lower()
+        
+        if user_role not in ('admin', 'administrator', 'superuser'):
+            return json_response(False, 'Only admins can delete meetings', 403)
+        
         try:
             success, _, _ = safe_execute(
-                sb.table('meetings').delete().eq('id', meeting_id),
+                sb.table('meetings').delete().eq('id', meeting_id_int),
                 'delete_meeting'
             )
             if not success:
                 return json_response(False, 'Failed to delete', 500)
             return json_response(True, 'Meeting deleted')
         except Exception:
+            logger.exception('Delete meeting error')
             return json_response(False, 'Server error', 500)
     
     # PATCH
+    current_user = request.user_data
+    user_role = (current_user.get('role', '')).lower()
+    
     data = request.get_json() or {}
     allowed = {}
     
+    non_admin_allowed_fields = ['status']
+    
     for key in ['title', 'type', 'purpose', 'datetime', 'location', 'status']:
         if key in data:
+            if user_role not in ('admin', 'administrator', 'superuser') and key not in non_admin_allowed_fields:
+                return json_response(False, f'Only admins can update {key}', 403)
             allowed[key] = data[key]
     
     if 'meetLink' in data:
+        if user_role not in ('admin', 'administrator', 'superuser'):
+            return json_response(False, 'Only admins can update meet link', 403)
         allowed['meet_link'] = data['meetLink']
+    
+    if 'meet_link' in data:
+        if user_role not in ('admin', 'administrator', 'superuser'):
+            return json_response(False, 'Only admins can update meet link', 403)
+        allowed['meet_link'] = data['meet_link']
+    
     if 'attendees' in data:
+        if user_role not in ('admin', 'administrator', 'superuser'):
+            return json_response(False, 'Only admins can update attendees', 403)
         allowed['attendees'] = json.dumps(data['attendees'])
+    
+    if 'datetime' in allowed:
+        try:
+            dt = datetime.fromisoformat(allowed['datetime'].replace('Z', '+00:00'))
+            allowed['datetime'] = dt.isoformat()
+        except Exception:
+            try:
+                dt = datetime.strptime(allowed['datetime'], '%Y-%m-%dT%H:%M')
+                allowed['datetime'] = dt.isoformat()
+            except Exception:
+                return json_response(False, 'Invalid datetime format', 400)
     
     if not allowed:
         return json_response(False, 'No fields to update', 400)
     
     try:
-        success, _, _ = safe_execute(
-            sb.table('meetings').update(allowed).eq('id', meeting_id),
+        success, _, error = safe_execute(
+            sb.table('meetings').update(allowed).eq('id', meeting_id_int),
             'update_meeting'
         )
         if not success:
-            return json_response(False, 'Failed to update', 500)
+            return json_response(False, f'Failed to update: {error}', 500)
         return json_response(True, 'Meeting updated')
     except Exception:
+        logger.exception('Update meeting error')
         return json_response(False, 'Server error', 500)
+
+
+def serialize_meeting(row):
+    """Serialize meeting for Flutter"""
+    m = {
+        "id": row.get("id"),
+        "title": row.get("title"),
+        "type": row.get("type", ""),
+        "purpose": row.get("purpose") or "",
+        "datetime": row.get("datetime"),
+        "location": row.get("location") or "",
+        "meetLink": row.get("meet_link") or "",
+        "meet_link": row.get("meet_link") or "",
+        "status": row.get("status") or "Not Started",
+        "attendees": []
+    }
+    try:
+        attendees_str = row.get("attendees")
+        attendee_list = []
+        
+        if attendees_str:
+            if isinstance(attendees_str, str):
+                attendee_list = json.loads(attendees_str)
+            elif isinstance(attendees_str, list):
+                attendee_list = attendees_str
+        
+        if 'all' in attendee_list:
+            m["attendees"] = ['all']
+            return m
+        
+        m["attendees"] = attendee_list if attendee_list else []
+        
+    except Exception as e:
+        logger.exception(f'Error serializing meeting attendees: {e}')
+        m["attendees"] = []
+    
+    return m
+
+
+def user_is_attendee(meeting_row, user_email):
+    """Check if user is invited to meeting"""
+    try:
+        attendees_str = meeting_row.get("attendees")
+        if not attendees_str:
+            return False
+        
+        attendee_list = []
+        if isinstance(attendees_str, str):
+            attendee_list = json.loads(attendees_str)
+        elif isinstance(attendees_str, list):
+            attendee_list = attendees_str
+        
+        if 'all' in attendee_list:
+            return True
+        
+        user_email_lower = user_email.lower().strip()
+        
+        for attendee in attendee_list:
+            if attendee == 'all':
+                return True
+            
+            if isinstance(attendee, dict):
+                email = attendee.get('email', '').lower().strip()
+                if email == user_email_lower:
+                    return True
+            elif isinstance(attendee, str):
+                if '@' in attendee and attendee.lower().strip() == user_email_lower:
+                    return True
+        
+        return False
+    except Exception as e:
+        logger.exception(f'Error checking attendee: {e}')
+        return False
 
 
 # ================================================================================
@@ -1535,21 +1325,10 @@ def api_meeting_item(meeting_id):
 @app.route('/api/budget', methods=['GET'])
 @token_required
 def api_budget_root():
-    """
-    Get all budget data (categories, transactions, funds, tickets)
-    
-    Response:
-        {
-            "categories": [...],
-            "transactions": [...],
-            "funds": [],
-            "tickets": []
-        }
-    """
+    """Get all budget data"""
     try:
         sb = get_supabase()
         
-        # Categories
         success, cats, _ = safe_execute(
             sb.table('budget_categories').select('*').order('name'),
             'get_categories'
@@ -1560,7 +1339,6 @@ def api_budget_root():
             'budget': float(c.get('budget', 0))
         } for c in (cats or [])]
         
-        # Transactions
         success, txs, _ = safe_execute(
             sb.table('budget_transactions').select('*').order('date', desc=True),
             'get_transactions'
@@ -1590,19 +1368,7 @@ def api_budget_root():
 @app.route('/api/budget/transactions', methods=['POST'])
 @token_required
 def api_create_transaction():
-    """
-    Create budget transaction with optional receipt
-    
-    Content-Type: multipart/form-data
-    
-    Form Data:
-        - type: "expense" | "income"
-        - category: Category name
-        - description: Transaction description
-        - amount: Amount (float)
-        - date: Date (YYYY-MM-DD)
-        - receipt: File (optional)
-    """
+    """Create budget transaction"""
     try:
         user_id = request.user_data['user_id']
         data = request.form.to_dict() if request.content_type and 'multipart' in request.content_type else request.get_json() or {}
@@ -1611,13 +1377,11 @@ def api_create_transaction():
         if not category:
             return json_response(False, 'Category required', 400)
         
-        # Verify category exists
         sb = get_supabase()
         cat = fetch_one('budget_categories', name=category)
         if not cat:
             return json_response(False, f'Category "{category}" does not exist', 400)
         
-        # Handle receipt
         receipt_filename = None
         if 'receipt' in request.files:
             file = request.files['receipt']
@@ -1650,33 +1414,19 @@ def api_create_transaction():
     except Exception:
         logger.exception('Create transaction error')
         return json_response(False, 'Server error', 500)
+
+
 # ================================================================================
-# SECTION 14.5: STUDENTS API
+# SECTION 15: STUDENTS API
 # ================================================================================
 
 @app.route('/api/students', methods=['GET'])
 @token_required
 def api_students():
-    """
-    Get all students (users with role='user')
-    
-    Response:
-        [
-            {
-                "id": 1,
-                "name": "John Doe",
-                "email": "john@gmail.com",
-                "school": "ABC High School",
-                "strand": "STEM",
-                "gradeLevel": "12"
-            },
-            ...
-        ]
-    """
+    """Get all students"""
     try:
         sb = get_supabase()
         
-        # Get all users with role='user'
         query = sb.table('users').select('*').eq('role', 'user').order('display_name')
         success, data, _ = safe_execute(query, 'get_students')
         
@@ -1702,56 +1452,49 @@ def api_students():
     except Exception:
         logger.exception('Get students error')
         return jsonify([])
-    
+
+
 # ================================================================================
-# SECTION 15: ERROR HANDLERS
+# SECTION 16: ERROR HANDLERS
 # ================================================================================
 
 @app.errorhandler(404)
 def not_found(e):
-    """Handle 404 errors"""
     return json_response(False, 'Endpoint not found', 404)
-
 
 @app.errorhandler(500)
 def internal_error(e):
-    """Handle 500 errors"""
     logger.exception('Internal server error')
     return json_response(False, 'Internal server error', 500)
 
-
 @app.errorhandler(413)
 def file_too_large(e):
-    """Handle file size errors"""
     return json_response(False, 'File too large', 413)
 
 
 # ================================================================================
-# SECTION 16: HEALTH CHECK & DEBUG
+# SECTION 17: HEALTH CHECK & DEBUG
 # ================================================================================
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat() + 'Z'
     })
 
-
 @app.route('/api/config', methods=['GET'])
 def api_config():
-    """Get API configuration status"""
     return jsonify({
         'supabase_configured': bool(SUPABASE_URL and SUPABASE_KEY),
         'supabase_available': SUPABASE_AVAILABLE,
         'smtp_configured': bool(SMTP_EMAIL and SMTP_PASS),
-        'version': '3.0'
+        'version': '3.1'
     })
 
 
 # ================================================================================
-# SECTION 17: APPLICATION STARTUP
+# SECTION 18: APPLICATION STARTUP
 # ================================================================================
 
 if __name__ == '__main__':
@@ -1759,7 +1502,6 @@ if __name__ == '__main__':
     logger.info('LIKHAYAG MOBILE API - Starting...')
     logger.info('=' * 80)
     
-    # Validate configuration
     if not SUPABASE_URL or not SUPABASE_KEY:
         logger.error('❌ SUPABASE_URL and SUPABASE_KEY must be set in environment')
         exit(1)
@@ -1768,7 +1510,6 @@ if __name__ == '__main__':
         logger.error('❌ Supabase library not installed. Run: pip install supabase')
         exit(1)
     
-    # Test database connection
     try:
         sb = get_supabase()
         success, _, _ = safe_execute(sb.table('users').select('id').limit(1), 'startup_test')
@@ -1780,7 +1521,6 @@ if __name__ == '__main__':
         logger.error(f'❌ Startup check failed: {e}')
         exit(1)
     
-    # Start server
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() in ('true', '1')
     host = os.getenv('FLASK_HOST', '0.0.0.0')
     port = int(os.getenv('FLASK_PORT', '5000'))
@@ -1790,4 +1530,3 @@ if __name__ == '__main__':
     logger.info('=' * 80)
     
     app.run(debug=debug_mode, host=host, port=port)
-

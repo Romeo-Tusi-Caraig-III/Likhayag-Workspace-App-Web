@@ -19,6 +19,8 @@ dependencies:
   file_picker: ^10.3.7
   fl_chart: ^1.1.1
   image_picker: ^1.0.4
+  url_launcher: ^6.1.10
+  shimmer: ^2.0.0
 
 dev_dependencies:
   flutter_test:

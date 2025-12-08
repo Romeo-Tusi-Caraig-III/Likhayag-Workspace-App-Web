@@ -618,104 +618,291 @@ class ApiService {
   // ==================== MEETINGS ====================
   
   static Future<List<dynamic>> getMeetings() async {
-    try {
-      print('📅 Fetching meetings');
-      
-      final headers = await _getHeaders();
-      final response = await http
-          .get(
-            Uri.parse('$baseUrl/api/meetings'),
-            headers: headers,
-          )
-          .timeout(timeoutDuration);
+  try {
+    print('📅 Fetching meetings');
+    
+    final headers = await _getHeaders();
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/api/meetings'),
+          headers: headers,
+        )
+        .timeout(timeoutDuration);
 
-      if (response.statusCode == 200) {
-        final meetings = jsonDecode(response.body) as List;
-        print('✅ Fetched ${meetings.length} meetings');
-        return meetings;
-      } else {
-        print('❌ Get meetings failed: ${response.statusCode}');
+    print('📡 Meetings response: ${response.statusCode}');
+
+    if (response.statusCode == 200) {
+      final body = response.body;
+      if (body.isEmpty) {
+        print('⚠️ Empty response body');
         return [];
       }
-    } catch (e) {
-      print('❌ Get meetings error: $e');
+
+      final decoded = jsonDecode(body);
+      
+      // Handle both array and object responses
+      List<dynamic> meetings = [];
+      if (decoded is List) {
+        meetings = decoded;
+      } else if (decoded is Map && decoded.containsKey('meetings')) {
+        meetings = decoded['meetings'] as List;
+      } else {
+        print('⚠️ Unexpected response format: ${decoded.runtimeType}');
+        return [];
+      }
+
+      print('✅ Fetched ${meetings.length} meetings');
+      return meetings;
+    } else if (response.statusCode == 401) {
+      print('🔒 Unauthorized - token may be expired');
+      await clearToken();
+      return [];
+    } else {
+      print('❌ Get meetings failed: ${response.statusCode}');
+      print('Response body: ${response.body}');
       return [];
     }
+  } catch (e) {
+    print('❌ Get meetings error: $e');
+    return [];
   }
+}
 
-  static Future<Map<String, dynamic>> createMeeting(
-    Map<String, dynamic> meetingData,
-  ) async {
-    try {
-      print('➕ Creating meeting: ${meetingData['title']}');
-      
-      final headers = await _getHeaders();
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/api/meetings'),
-            headers: headers,
-            body: jsonEncode(meetingData),
-          )
-          .timeout(timeoutDuration);
-
-      return _handleResponse(response);
-    } catch (e) {
-      print('❌ Create meeting error: $e');
+static Future<Map<String, dynamic>> createMeeting(
+  Map<String, dynamic> meetingData,
+) async {
+  try {
+    print('➕ Creating meeting: ${meetingData['title']}');
+    
+    // Validate required fields
+    if (meetingData['title'] == null || meetingData['title'].toString().isEmpty) {
       return {
         'success': false,
-        'message': _getErrorMessage(e),
+        'message': 'Title is required',
       };
     }
-  }
-
-  static Future<Map<String, dynamic>> updateMeeting(
-    int meetingId,
-    Map<String, dynamic> updates,
-  ) async {
-    try {
-      print('📝 Updating meeting: $meetingId');
-      
-      final headers = await _getHeaders();
-      final response = await http
-          .patch(
-            Uri.parse('$baseUrl/api/meetings/$meetingId'),
-            headers: headers,
-            body: jsonEncode(updates),
-          )
-          .timeout(timeoutDuration);
-
-      return _handleResponse(response);
-    } catch (e) {
-      print('❌ Update meeting error: $e');
+    
+    if (meetingData['datetime'] == null) {
       return {
         'success': false,
-        'message': _getErrorMessage(e),
+        'message': 'Datetime is required',
       };
     }
-  }
-
-  static Future<Map<String, dynamic>> deleteMeeting(int meetingId) async {
-    try {
-      print('🗑️ Deleting meeting: $meetingId');
-      
-      final headers = await _getHeaders();
-      final response = await http
-          .delete(
-            Uri.parse('$baseUrl/api/meetings/$meetingId'),
-            headers: headers,
-          )
-          .timeout(timeoutDuration);
-
-      return _handleResponse(response);
-    } catch (e) {
-      print('❌ Delete meeting error: $e');
+    
+    // Format datetime properly
+    String datetimeStr;
+    if (meetingData['datetime'] is DateTime) {
+      datetimeStr = (meetingData['datetime'] as DateTime).toIso8601String();
+    } else if (meetingData['datetime'] is String) {
+      datetimeStr = meetingData['datetime'];
+    } else {
       return {
         'success': false,
-        'message': _getErrorMessage(e),
+        'message': 'Invalid datetime format',
       };
     }
-  }
+    
+    // Format meeting data for backend (use meetLink, not meet_link)
+    final formattedData = {
+      'title': meetingData['title'],
+      'type': meetingData['type'] ?? '',
+      'purpose': meetingData['purpose'] ?? '',
+      'datetime': datetimeStr,
+      'location': meetingData['location'] ?? '',
+      'meetLink': meetingData['meetLink'] ?? '',  // Backend expects 'meetLink'
+      'attendees': meetingData['attendees'] ?? [],
+    };
+    
+    final headers = await _getHeaders();
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/api/meetings'),
+          headers: headers,
+          body: jsonEncode(formattedData),
+        )
+        .timeout(timeoutDuration);
 
+    print('📡 Create meeting response: ${response.statusCode}');
+    print('Response body: ${response.body}');
+
+    return _handleResponse(response);
+  } catch (e) {
+    print('❌ Create meeting error: $e');
+    return {
+      'success': false,
+      'message': _getErrorMessage(e),
+    };
+  }
+}
+
+static Future<Map<String, dynamic>> updateMeeting(
+  String meetingId,  // Changed from int to String to match your frontend
+  Map<String, dynamic> updates,
+) async {
+  try {
+    print('📝 Updating meeting: $meetingId');
+    
+    // Format updates for backend
+    final formattedUpdates = <String, dynamic>{};
+    
+    // Handle all standard fields
+    for (final key in ['title', 'type', 'purpose', 'location', 'status']) {
+      if (updates.containsKey(key)) {
+        formattedUpdates[key] = updates[key];
+      }
+    }
+    
+    // Handle meetLink (Flutter) -> meetLink (backend expects this now)
+    if (updates.containsKey('meetLink')) {
+      formattedUpdates['meetLink'] = updates['meetLink'];
+    }
+    
+    // Handle datetime formatting if provided
+    if (updates.containsKey('datetime')) {
+      if (updates['datetime'] is DateTime) {
+        formattedUpdates['datetime'] = (updates['datetime'] as DateTime).toIso8601String();
+      } else if (updates['datetime'] is String) {
+        formattedUpdates['datetime'] = updates['datetime'];
+      }
+    }
+    
+    // Handle attendees array
+    if (updates.containsKey('attendees')) {
+      formattedUpdates['attendees'] = updates['attendees'];
+    }
+    
+    if (formattedUpdates.isEmpty) {
+      return {
+        'success': false,
+        'message': 'No fields to update',
+      };
+    }
+    
+    final headers = await _getHeaders();
+    final response = await http
+        .patch(
+          Uri.parse('$baseUrl/api/meetings/$meetingId'),  // meetingId as string in URL
+          headers: headers,
+          body: jsonEncode(formattedUpdates),
+        )
+        .timeout(timeoutDuration);
+
+    print('📡 Update meeting response: ${response.statusCode}');
+    return _handleResponse(response);
+  } catch (e) {
+    print('❌ Update meeting error: $e');
+    return {
+      'success': false,
+      'message': _getErrorMessage(e),
+    };
+  }
+}
+
+static Future<Map<String, dynamic>> updateMeetingStatus(
+  String meetingId,  // Changed from int to String
+  String status,
+) async {
+  try {
+    print('🔄 Updating meeting status: $meetingId -> $status');
+    
+    final headers = await _getHeaders();
+    final response = await http
+        .patch(
+          Uri.parse('$baseUrl/api/meetings/$meetingId'),
+          headers: headers,
+          body: jsonEncode({'status': status}),
+        )
+        .timeout(timeoutDuration);
+
+    return _handleResponse(response);
+  } catch (e) {
+    print('❌ Update meeting status error: $e');
+    return {
+      'success': false,
+      'message': _getErrorMessage(e),
+    };
+  }
+}
+
+static Future<Map<String, dynamic>> deleteMeeting(String meetingId) async {
+  try {
+    print('🗑️ Deleting meeting: $meetingId');
+    
+    final headers = await _getHeaders();
+    final response = await http
+        .delete(
+          Uri.parse('$baseUrl/api/meetings/$meetingId'),
+          headers: headers,
+        )
+        .timeout(timeoutDuration);
+
+    return _handleResponse(response);
+  } catch (e) {
+    print('❌ Delete meeting error: $e');
+    return {
+      'success': false,
+      'message': _getErrorMessage(e),
+    };
+  }
+}
+
+static Future<Map<String, dynamic>> getMeetingById(String meetingId) async {
+  try {
+    print('📋 Fetching meeting details: $meetingId');
+    
+    final headers = await _getHeaders();
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/api/meetings/$meetingId'),
+          headers: headers,
+        )
+        .timeout(timeoutDuration);
+
+    if (response.statusCode == 200) {
+      final meeting = jsonDecode(response.body);
+      return {
+        'success': true,
+        'meeting': meeting,
+      };
+    } else if (response.statusCode == 403) {
+      return {
+        'success': false,
+        'message': 'Access denied - you are not invited to this meeting',
+      };
+    } else if (response.statusCode == 404) {
+      return {
+        'success': false,
+        'message': 'Meeting not found',
+      };
+    } else {
+      return {
+        'success': false,
+        'message': 'Failed to fetch meeting: ${response.statusCode}',
+      };
+    }
+  } catch (e) {
+    print('❌ Get meeting by ID error: $e');
+    return {
+      'success': false,
+      'message': _getErrorMessage(e),
+    };
+  }
+}
+
+/// Helper function to format meeting data from API response
+static Map<String, dynamic> formatMeetingForDisplay(Map<String, dynamic> meeting) {
+  return {
+    'id': meeting['id'].toString(),  // Ensure ID is string
+    'title': meeting['title'] ?? 'Untitled Meeting',
+    'type': meeting['type'] ?? '',
+    'purpose': meeting['purpose'] ?? '',
+    'datetime': meeting['datetime'],
+    'location': meeting['location'] ?? '',
+    'meetLink': meeting['meetLink'] ?? meeting['meet_link'] ?? '',  // Handle both formats
+    'status': meeting['status'] ?? 'Not Started',
+    'attendees': meeting['attendees'] is List ? List<String>.from(meeting['attendees']) : [],
+  };
+}
   // ==================== BUDGET ====================
   
   static Future<Map<String, dynamic>> getBudgetData() async {

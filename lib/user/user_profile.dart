@@ -399,7 +399,6 @@ class _InfoCard extends StatelessWidget {
     required this.child,
     this.actionText,
     this.onAction,
-    super.key,
   });
 
   @override
@@ -680,7 +679,7 @@ class _EditFormState extends State<EditForm> {
 /// Perfect circular close button for the edit-sheet header
 class _SmallCircularClose extends StatelessWidget {
   final VoidCallback onPressed;
-  const _SmallCircularClose({required this.onPressed, super.key});
+  const _SmallCircularClose({required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -709,7 +708,7 @@ class _GradientPill extends StatelessWidget {
   final VoidCallback onPressed;
   final Widget child;
 
-  const _GradientPill({required this.onPressed, required this.child, super.key});
+  const _GradientPill({required this.onPressed, required this.child});
 
   @override
   Widget build(BuildContext context) {

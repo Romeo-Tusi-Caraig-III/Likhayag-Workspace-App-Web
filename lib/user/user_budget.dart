@@ -479,40 +479,7 @@ class _UserBudgetPageState extends State<UserBudgetPage> with SingleTickerProvid
         title: const Text('Budget Overview', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 120),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: emeraldStart.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: emeraldStart.withOpacity(0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.visibility, size: 16, color: emeraldStart),
-                    SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        'View Only',
-                        style: TextStyle(
-                          color: emeraldStart,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
+        // NOTE: "View Only" action removed here
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
           child: Container(

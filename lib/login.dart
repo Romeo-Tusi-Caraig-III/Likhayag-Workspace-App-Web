@@ -554,7 +554,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
 
 class _InputPill extends StatelessWidget {
   const _InputPill({
-    super.key,
     required this.controller,
     required this.hint,
     this.prefix,
