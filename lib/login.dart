@@ -1,11 +1,12 @@
 // lib/login_page.dart
+// Updated with role-based routing
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'services/api_service.dart'; // Import the API service
+import 'services/api_service.dart';
 
-/// Global emerald color used throughout the page
 const Color kEmerald = Color(0xFF059669);
 
 class LoginPage extends StatefulWidget {
@@ -54,7 +55,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     super.dispose();
   }
 
-  /// Load remembered email from SharedPreferences
   Future<void> _loadRememberedEmail() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -110,7 +110,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     final password = _passwordController.text;
 
     try {
-      // Use ApiService for login
       debugPrint('🔐 Attempting login via ApiService...');
       final result = await ApiService.login(email, password);
 
@@ -118,25 +117,32 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
 
       debugPrint('Login result: $result');
 
-      // Check if login was successful
       if (result['success'] == true) {
-        // Save or remove remembered email
         final prefs = await SharedPreferences.getInstance();
+        
+        // Save remember me preference
         if (_rememberMe) {
           await prefs.setString('remembered_email', email);
         } else {
           await prefs.remove('remembered_email');
         }
         
-        // Save additional user data if needed
+        // Save login state and user info
         await prefs.setBool('isLoggedIn', true);
         await prefs.setString('userEmail', email);
         
+        // Extract user data from response
         final user = result['user'] as Map<String, dynamic>?;
         if (user != null) {
           await prefs.setString('userName', user['name'] ?? '');
           await prefs.setString('userId', user['id']?.toString() ?? '');
-          await prefs.setString('userRole', user['role'] ?? 'user');
+          
+          // Save user role
+          final role = (user['role'] ?? 'user').toString().toLowerCase();
+          await prefs.setString('userRole', role);
+          
+          debugPrint('✅ User role saved: $role');
+          debugPrint('✅ User email: $email');
         }
 
         _showSuccess('Login successful!');
@@ -145,7 +151,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         await Future.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
         
-        // Navigate to home (clears navigation stack)
+        // Navigate to role-based home (will redirect to appropriate screen)
         Navigator.pushNamedAndRemoveUntil(
           context, 
           '/home', 
@@ -212,7 +218,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
             padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 18),
             child: Column(
               children: [
-                // Animated header
                 SizeTransition(
                   axisAlignment: -1.0,
                   sizeFactor: _headerAnim,
@@ -220,7 +225,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                 ),
                 const SizedBox(height: 28),
 
-                // Main login card
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 0),
                   child: ConstrainedBox(
@@ -269,7 +273,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                               key: _formKey,
                               child: Column(
                                 children: [
-                                  // Email field
                                   _InputPill(
                                     controller: _emailController,
                                     hint: 'Email',
@@ -285,7 +288,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                                   ),
                                   const SizedBox(height: 12),
                                   
-                                  // Password field
                                   _InputPill(
                                     controller: _passwordController,
                                     hint: 'Password',
@@ -309,7 +311,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                                   ),
                                   const SizedBox(height: 10),
 
-                                  // Remember me & Forgot password
                                   Row(
                                     mainAxisAlignment:
                                         MainAxisAlignment.spaceBetween,
@@ -370,7 +371,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
 
                                   const SizedBox(height: 12),
 
-                                  // Sign in button
                                   SizedBox(
                                     width: double.infinity,
                                     height: 50,
@@ -414,7 +414,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
 
                             const SizedBox(height: 22),
 
-                            // Sign up link
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -458,7 +457,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Gradient background
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
@@ -474,8 +472,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
               ),
             ),
           ),
-
-          // Decorative circles
           Positioned(
             right: -40,
             top: 10,
@@ -506,8 +502,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
               ),
             ),
           ),
-
-          // App icon
           Positioned(
             left: 0,
             right: 0,
@@ -537,8 +531,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
               ),
             ),
           ),
-
-          // App name
           const Positioned(
             left: 0,
             right: 0,
@@ -560,7 +552,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   }
 }
 
-/// Custom input field widget
 class _InputPill extends StatelessWidget {
   const _InputPill({
     super.key,
