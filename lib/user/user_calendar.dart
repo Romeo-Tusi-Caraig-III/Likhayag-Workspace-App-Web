@@ -1,5 +1,5 @@
 // lib/user/user_calendar.dart
-// Read-only calendar for regular users — AppBar removed, in-body header kept, FAB removed
+// Enhanced read-only calendar for regular users with improved design
 
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
@@ -88,6 +88,11 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
   bool _isLoading = false;
   bool _isRefreshing = false;
 
+  bool _showTasks = true;
+  bool _showMeetings = true;
+  bool _showCompleted = true;
+  bool _showPending = true;
+
   static const Color primary = Color(0xFF10B981);
   static const Color primaryDark = Color(0xFF059669);
 
@@ -115,6 +120,17 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
     final minute = d.minute.toString().padLeft(2, '0');
     final ampm = d.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $ampm';
+  }
+
+  List<Event> _getFilteredEvents(List<Event> events) {
+    return events.where((event) {
+      if (event.source == 'task' && !_showTasks) return false;
+      if (event.source == 'meeting' && !_showMeetings) return false;
+      final isCompleted = event.status.toLowerCase().contains('complete');
+      if (isCompleted && !_showCompleted) return false;
+      if (!isCompleted && !_showPending) return false;
+      return true;
+    }).toList();
   }
 
   Future<void> _loadEvents() async {
@@ -185,7 +201,7 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
             newEvents.putIfAbsent(key, () => []);
             newEvents[key]!.add(event);
           } catch (e) {
-            // Silently skip invalid tasks during refresh
+            // Skip
           }
         }
       }
@@ -197,7 +213,7 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
           newEvents.putIfAbsent(key, () => []);
           newEvents[key]!.add(event);
         } catch (e) {
-          // Silently skip invalid meetings during refresh
+          // Skip
         }
       }
 
@@ -218,25 +234,334 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  Future<void> _goToToday() async {
+    setState(() {
+      _displayMonth = DateTime.now();
+      _selectedDate = DateTime.now();
+    });
+
+    final todayKey = _dateKey(DateTime.now());
+    final allEvents = _events[todayKey] ?? [];
+    final filteredEvents = _getFilteredEvents(allEvents);
+
+    if (filteredEvents.isNotEmpty) {
+      _openDayEvents(DateTime.now());
+    } else {
+      _showSnack('No events today');
+    }
+  }
+
+  Future<void> _showCalendarFilters() async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Calendar Filters',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(colors: [primary, primaryDark]),
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _FilterOption(
+              icon: Icons.task_alt,
+              label: 'Show Tasks',
+              value: _showTasks,
+              onChanged: (val) => setState(() => _showTasks = val),
+            ),
+            _FilterOption(
+              icon: Icons.event,
+              label: 'Show Meetings',
+              value: _showMeetings,
+              onChanged: (val) => setState(() => _showMeetings = val),
+            ),
+            _FilterOption(
+              icon: Icons.check_circle,
+              label: 'Show Completed',
+              value: _showCompleted,
+              onChanged: (val) => setState(() => _showCompleted = val),
+            ),
+            _FilterOption(
+              icon: Icons.pending,
+              label: 'Show Pending',
+              value: _showPending,
+              onChanged: (val) => setState(() => _showPending = val),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _GradientButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      setState(() {});
+                      _showSnack('Filters applied');
+                    },
+                    child: const Text('Apply'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEventDetails(Event event) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    event.source == 'task' ? Icons.task : Icons.event,
+                    color: primary,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        event.title,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        event.source.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _DetailRow(
+              icon: Icons.access_time,
+              label: 'Time',
+              value: _timeLabel(event.start),
+            ),
+            const SizedBox(height: 16),
+            _DetailRow(
+              icon: Icons.category,
+              label: 'Type',
+              value: event.type,
+            ),
+            const SizedBox(height: 16),
+            _DetailRow(
+              icon: Icons.flag,
+              label: 'Status',
+              value: event.status,
+              valueColor: event.status.toLowerCase().contains('complete')
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+            if (event.location.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _DetailRow(
+                icon: Icons.location_on,
+                label: 'Location',
+                value: event.location,
+              ),
+            ],
+            if (event.description.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _DetailRow(
+                icon: Icons.notes,
+                label: 'Description',
+                value: event.description,
+              ),
+            ],
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: _GradientButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openDayEvents(DateTime date) {
+    final key = _dateKey(date);
+    final allEvents = _events[key] ?? [];
+    final events = _getFilteredEvents(allEvents);
+
+    if (events.isEmpty) {
+      _showSnack('No events on ${_dateLabel(date)}');
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.7,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [primary, primaryDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.event, color: Colors.white, size: 28),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _dateLabel(date),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${events.length} event${events.length > 1 ? 's' : ''}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.all(16),
+                itemCount: events.length,
+                itemBuilder: (context, i) => _EventCard(
+                  event: events[i],
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showEventDetails(events[i]);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    const padding = 12.0;
-
     return Scaffold(
       extendBody: true,
-      // AppBar removed — in-body header is kept below, floating button removed
       body: RefreshIndicator(
         onRefresh: _refreshEvents,
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: padding),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Column(
               children: [
-                // keep the header chips (calendar overview) inside the body
+                const SizedBox(height: 8),
                 _headerRightChips(),
                 const SizedBox(height: 12),
                 _monthNavigator(),
@@ -252,6 +577,26 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
             ),
           ),
         ),
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            onPressed: _showCalendarFilters,
+            heroTag: 'filter',
+            mini: true,
+            backgroundColor: Colors.white,
+            foregroundColor: primary,
+            child: const Icon(Icons.filter_list),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            onPressed: _goToToday,
+            heroTag: 'today',
+            backgroundColor: primary,
+            child: const Icon(Icons.today),
+          ),
+        ],
       ),
     );
   }
@@ -366,7 +711,7 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
           child: Center(
             child: Text(
               _monthLabel(_displayMonth),
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
             ),
           ),
         ),
@@ -395,7 +740,10 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
                 child: Center(
                   child: Text(
                     d,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ))
@@ -428,7 +776,7 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
 
   Widget _emptyTile() {
     return Padding(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(4),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
@@ -441,7 +789,8 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
 
   Widget _dayTile(DateTime date) {
     final key = _dateKey(date);
-    final events = _events[key] ?? [];
+    final allEvents = _events[key] ?? [];
+    final events = _getFilteredEvents(allEvents);
     final todayKey = _dateKey(DateTime.now());
     final isToday = key == todayKey;
     final hasEvents = events.isNotEmpty;
@@ -474,12 +823,16 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
     final int overflow = events.length - dotsToShow;
 
     return Padding(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(4),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () {
           setState(() => _selectedDate = date);
-          _openDayEvents(date);
+          if (events.isNotEmpty) {
+            _openDayEvents(date);
+          } else {
+            _showSnack('No events on ${_dateLabel(date)}');
+          }
         },
         child: Container(
           decoration: BoxDecoration(
@@ -487,187 +840,275 @@ class _UserCalendarPageState extends State<UserCalendarPage> {
             borderRadius: BorderRadius.circular(8),
             border: border,
           ),
-          child: ClipRect(
-            child: SizedBox.expand(
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: 6,
-                    left: 8,
-                    right: 8,
-                    child: Text(
-                      "${date.day}",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: textColor,
-                      ),
-                    ),
-                  ),
-                  if (events.isNotEmpty)
-                    Positioned(
-                      left: 8,
-                      right: 8,
-                      bottom: 6,
-                      child: Row(
-                        children: [
-                          for (int i = 0; i < dotsToShow; i++)
-                            Container(
-                              width: 8,
-                              height: 8,
-                              margin: const EdgeInsets.only(right: 4),
-                              decoration: BoxDecoration(
-                                color: isSelected ? Colors.white : primary,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                          if (overflow > 0)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? Colors.white
-                                    : primary.withOpacity(0.18),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                "+$overflow",
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: primaryDark,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                ],
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '${date.day}',
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
               ),
+              if (hasEvents) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ...List.generate(
+                      dotsToShow,
+                      (i) => Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 1),
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.white : primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    if (overflow > 0)
+                      Container(
+                        margin: const EdgeInsets.only(left: 2),
+                        child: Text(
+                          '+$overflow',
+                          style: TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? Colors.white : primary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== HELPER WIDGETS ====================
+
+class _GradientButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final Widget child;
+
+  const _GradientButton({
+    required this.onPressed,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [_UserCalendarPageState.primary, _UserCalendarPageState.primaryDark],
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            alignment: Alignment.center,
+            child: DefaultTextStyle(
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+              child: child,
             ),
           ),
         ),
       ),
     );
   }
+}
 
-  void _openDayEvents(DateTime date) {
-    final key = _dateKey(date);
-    final events = _events[key] ?? [];
+class _FilterOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) {
-        return Container(
-          color: Colors.black.withOpacity(0.18),
-          child: DraggableScrollableSheet(
-            initialChildSize: 0.5,
-            maxChildSize: 0.9,
-            builder: (context, controller) {
-              return Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+  const _FilterOption({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: SwitchListTile(
+        value: value,
+        onChanged: onChanged,
+        secondary: Icon(icon, color: _UserCalendarPageState.primary),
+        title: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        activeColor: _UserCalendarPageState.primary,
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: Colors.grey[600]),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
                 ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: valueColor ?? Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EventCard extends StatelessWidget {
+  final Event event;
+  final VoidCallback onTap;
+
+  const _EventCard({
+    required this.event,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isCompleted = event.status.toLowerCase().contains('complete');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _UserCalendarPageState.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  event.source == 'task' ? Icons.task : Icons.event,
+                  color: _UserCalendarPageState.primary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(
+                      event.title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back),
-                          onPressed: () => Navigator.pop(context),
+                        Icon(Icons.access_time, size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          DateFormat('h:mm a').format(event.start),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
                         ),
-                        Expanded(
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isCompleted
+                                ? Colors.green.withOpacity(0.1)
+                                : Colors.orange.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           child: Text(
-                            _dateLabel(date),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                            event.status,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isCompleted ? Colors.green : Colors.orange,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: events.isEmpty
-                          ? const Center(
-                              child: Text("No events for this day."),
-                            )
-                          : ListView.separated(
-                              controller: controller,
-                              itemBuilder: (context, index) {
-                                final e = events[index];
-                                return _buildEventTile(e);
-                              },
-                              separatorBuilder: (_, __) => const Divider(),
-                              itemCount: events.length,
-                            ),
-                    ),
                   ],
                 ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildEventTile(Event event) {
-    return ListTile(
-      leading: Icon(
-        event.source == 'task' ? Icons.task : Icons.event,
-        color: primary,
-      ),
-      title: Text(event.title),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("${_timeLabel(event.start)} • ${event.type}"),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: event.status.toLowerCase().contains('complete')
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  event.status,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: event.status.toLowerCase().contains('complete')
-                        ? Colors.green[700]
-                        : Colors.orange[700],
-                  ),
-                ),
               ),
-              const SizedBox(width: 8),
-              Chip(
-                label: Text(
-                  event.source.toUpperCase(),
-                  style: const TextStyle(fontSize: 10),
-                ),
-                backgroundColor: primary.withOpacity(0.1),
-                visualDensity: VisualDensity.compact,
-              ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
             ],
           ),
-        ],
+        ),
       ),
-      trailing: const Icon(Icons.visibility, color: primary),
-      isThreeLine: true,
     );
   }
 }

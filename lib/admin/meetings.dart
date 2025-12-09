@@ -1,11 +1,20 @@
 // lib/admin/meetings.dart
-// Enhanced Meetings with url_launcher, swipe-to-delete, multi-select, and visual tweaks
+// Meetings page — emerald gradient theme, safe Dropdown handling, shimmer, swipe-to-delete, multi-select, visual tweaks
+// Students-picker bottom sheet redesigned to match screenshot; "Done" button uses the emerald gradient.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shimmer/shimmer.dart';
 import '../services/api_service.dart';
+
+// Global emerald gradient colors (available everywhere in this file)
+const Color themeStart = Color(0xFF10B981); // emerald-500
+const Color themeEnd = Color(0xFF059669); // emerald-600
+
+// Accent used earlier for picker (kept for optional minor accents)
+const Color pickerAccent = Color(0xFF7C3AED);
+const Color pickerAccentLight = Color(0xFFF3E8FF);
 
 class Meeting {
   String id;
@@ -17,6 +26,13 @@ class Meeting {
   String? meetLink;
   String status;
   List<String> attendees;
+
+  static const List<String> validStatuses = [
+    'Not Started',
+    'In Progress',
+    'Completed',
+    'Cancelled',
+  ];
 
   Meeting({
     required this.id,
@@ -33,53 +49,71 @@ class Meeting {
   bool get isVirtual => meetLink != null && meetLink!.trim().isNotEmpty;
 
   factory Meeting.fromApi(Map<String, dynamic> m) {
-    // Safe attendees parsing
-    List<String> attendeesList = [];
-    final attendeesRaw = m['attendees'];
-    if (attendeesRaw is List) {
-      attendeesList = attendeesRaw.map((e) => (e?.toString() ?? '')).where((s) => s.isNotEmpty).toList();
+  // Parse attendees
+  List<String> attendeesList = [];
+  if (m['attendees'] != null) {
+    if (m['attendees'] is List) {
+      final rawAttendees = m['attendees'] as List;
+      attendeesList = rawAttendees.map((a) {
+        // Handle if attendees are objects with name/email
+        if (a is Map) {
+          return a['name']?.toString() ?? a['email']?.toString() ?? 'Unknown';
+        }
+        // Handle if attendees are already strings
+        return a.toString();
+      }).toList();
     }
+  }
 
-    // Safe datetime parsing with fallback
-    DateTime parsedDate;
-    final dtRaw = m['datetime'];
-    if (dtRaw != null) {
-      try {
-        parsedDate = DateTime.parse(dtRaw.toString());
-      } catch (_) {
-        parsedDate = DateTime.now();
-      }
-    } else {
+  // Parse datetime
+  DateTime parsedDate;
+  final dtRaw = m['datetime'];
+  if (dtRaw != null) {
+    try {
+      parsedDate = DateTime.parse(dtRaw.toString());
+    } catch (_) {
       parsedDate = DateTime.now();
     }
-
-    // Location and meet link with tolerant keys
-    String? location;
-    if (m.containsKey('location') && m['location'] != null) {
-      location = m['location'].toString();
-    } else if (m.containsKey('Location') && m['Location'] != null) {
-      location = m['Location'].toString();
-    }
-
-    String? meetLink;
-    if (m.containsKey('meetLink') && m['meetLink'] != null) {
-      meetLink = m['meetLink'].toString();
-    } else if (m.containsKey('meet_link') && m['meet_link'] != null) {
-      meetLink = m['meet_link'].toString();
-    }
-
-    return Meeting(
-      id: m['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
-      title: (m['title'] ?? '').toString(),
-      type: (m['type'] ?? 'project').toString(),
-      purpose: m['purpose']?.toString(),
-      datetime: parsedDate,
-      location: location,
-      meetLink: meetLink,
-      status: (m['status'] ?? 'Not Started').toString(),
-      attendees: attendeesList,
-    );
+  } else {
+    parsedDate = DateTime.now();
   }
+
+  // Parse location
+  String? location;
+  if (m.containsKey('location') && m['location'] != null) {
+    location = m['location'].toString();
+  } else if (m.containsKey('Location') && m['Location'] != null) {
+    location = m['Location'].toString();
+  }
+
+  // Parse meetLink
+  String? meetLink;
+  if (m.containsKey('meetLink') && m['meetLink'] != null) {
+    meetLink = m['meetLink'].toString();
+  } else if (m.containsKey('meet_link') && m['meet_link'] != null) {
+    meetLink = m['meet_link'].toString();
+  }
+
+  // Parse status
+  String statusRaw = (m['status'] ?? 'Not Started').toString();
+  String normalizedStatus = Meeting.validStatuses.contains(statusRaw) 
+      ? statusRaw 
+      : 'Not Started';
+
+  print('📅 Parsing meeting: ${m['title']} - ${m['datetime']} - Attendees: ${attendeesList.length}');
+
+  return Meeting(
+    id: m['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+    title: (m['title'] ?? '').toString(),
+    type: (m['type'] ?? 'project').toString(),
+    purpose: m['purpose']?.toString(),
+    datetime: parsedDate,
+    location: location,
+    meetLink: meetLink,
+    status: normalizedStatus,
+    attendees: attendeesList,
+  );
+}
 
   Map<String, dynamic> toApi() {
     return {
@@ -102,7 +136,8 @@ class MeetingsPage extends StatefulWidget {
   State<MeetingsPage> createState() => _MeetingsPageState();
 }
 
-class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderStateMixin {
+class _MeetingsPageState extends State<MeetingsPage>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final DateFormat _displayFormat = DateFormat('EEE, MMM d, h:mm a');
 
@@ -118,11 +153,6 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
   bool _fabExpanded = false;
   late AnimationController _fabController;
 
-  // New color theme (deep purple)
-  static const Color themeStart = Color(0xFF6D28D9);
-  static const Color themeEnd = Color(0xFF4C1D95);
-
-  // Selection state for multi-select
   final Set<String> _selectedIds = {};
 
   @override
@@ -136,7 +166,7 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
     );
 
     _searchController.addListener(() {
-      if (mounted) setState(() {}); // for clear button visibility
+      if (mounted) setState(() {});
     });
   }
 
@@ -202,7 +232,8 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
           if (item is Map<String, dynamic>) {
             _meetings.add(Meeting.fromApi(item));
           } else if (item is Map) {
-            _meetings.add(Meeting.fromApi(Map<String, dynamic>.from(item)));
+            _meetings
+                .add(Meeting.fromApi(Map<String, dynamic>.from(item)));
           }
         }
         _isRefreshing = false;
@@ -231,7 +262,8 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _updateMeeting(String meetingId, Map<String, dynamic> updates) async {
+  Future<void> _updateMeeting(
+      String meetingId, Map<String, dynamic> updates) async {
     try {
       final result = await ApiService.updateMeeting(meetingId, updates);
 
@@ -272,9 +304,12 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Delete ${_selectedIds.length} meeting(s)?'),
-        content: const Text('This will permanently delete the selected meetings.'),
+        content:
+            const Text('This will permanently delete the selected meetings.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(backgroundColor: themeStart),
@@ -314,7 +349,9 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
       builder: (ctx) => AlertDialog(
         title: Text('Update ${_selectedIds.length} meeting(s) to "$status"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(backgroundColor: themeStart),
@@ -350,7 +387,9 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
         title: const Text('Delete meeting?'),
         content: Text('Delete "${meeting.title}"? This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
@@ -361,15 +400,17 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
     );
   }
 
-  /// Confirm deletion of a single meeting (used by the delete icon in MeetingCard)
   Future<void> _confirmDelete(String meetingId) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete meeting?'),
-        content: const Text('This will permanently delete the meeting. Are you sure?'),
+        content:
+            const Text('This will permanently delete the meeting. Are you sure?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -386,7 +427,7 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
 
   Future<void> _exportMeetings() async {
     _showSnack('Exporting meetings... (Feature coming soon)');
-    // TODO: Implement export to CSV/PDF
+    // TODO: Implement CSV / PDF export
   }
 
   void _toggleFAB() {
@@ -425,13 +466,17 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
   int get _upcoming7DaysCount {
     final now = DateTime.now();
     final cutoff = now.add(const Duration(days: 7));
-    return _meetings.where((m) => m.datetime.isAfter(now) && m.datetime.isBefore(cutoff)).length;
+    return _meetings
+        .where((m) => m.datetime.isAfter(now) && m.datetime.isBefore(cutoff))
+        .length;
   }
 
   List<Meeting> get _nextUp {
     final now = DateTime.now();
     final cutoff = now.add(const Duration(days: 7));
-    final upcoming = _meetings.where((m) => m.datetime.isAfter(now) && m.datetime.isBefore(cutoff)).toList();
+    final upcoming = _meetings
+        .where((m) => m.datetime.isAfter(now) && m.datetime.isBefore(cutoff))
+        .toList();
     upcoming.sort((a, b) => a.datetime.compareTo(b.datetime));
     return upcoming.take(3).toList();
   }
@@ -469,8 +514,11 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
 
   void _toggleSelect(String id) {
     setState(() {
-      if (_selectedIds.contains(id)) _selectedIds.remove(id);
-      else _selectedIds.add(id);
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
     });
   }
 
@@ -487,10 +535,10 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final filtered = filteredMeetings;
-    final visible = _showMoreMeetings ? filtered : filtered.take(_maxVisibleMeetings).toList();
+    final visible =
+        _showMoreMeetings ? filtered : filtered.take(_maxVisibleMeetings).toList();
 
     return Scaffold(
-      // When selection active show selection bar at top
       body: Stack(
         children: [
           SafeArea(
@@ -501,7 +549,6 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header with stats
                     _buildHeaderCard(),
                     const SizedBox(height: 18),
 
@@ -512,7 +559,7 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                           child: TextField(
                             controller: _searchController,
                             decoration: InputDecoration(
-                              hintText: 'Search meetings or purpose...',
+                              hintText: 'Search meetings...',
                               prefixIcon: const Icon(Icons.search),
                               suffixIcon: _searchController.text.isNotEmpty
                                   ? IconButton(
@@ -525,7 +572,7 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                                     )
                                   : null,
                               filled: true,
-                              fillColor: Colors.grey.shade100,
+                              fillColor: Colors.grey.shade50,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide.none,
@@ -537,7 +584,10 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                         const SizedBox(width: 12),
                         IconButton(
                           icon: _isLoading
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
                               : const Icon(Icons.refresh),
                           tooltip: 'Refresh',
                           onPressed: (_isLoading || _isRefreshing) ? null : _refreshData,
@@ -546,8 +596,12 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                     ),
                     const SizedBox(height: 18),
 
-                    // Meetings list
-                    const Text('Meetings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    // stat tiles
+                    _buildStatTiles(),
+
+                    const SizedBox(height: 12),
+                    const Text('Meetings',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 12),
 
                     if (_isLoading)
@@ -578,7 +632,8 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                           return Dismissible(
                             key: Key('meeting_${m.id}'),
                             direction: DismissDirection.endToStart,
-                            confirmDismiss: (_) async => (await _confirmDismiss(context, m)) ?? false,
+                            confirmDismiss: (_) async =>
+                                (await _confirmDismiss(context, m)) ?? false,
                             onDismissed: (_) async {
                               await _deleteMeeting(m.id);
                             },
@@ -611,6 +666,7 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                           child: Text(_showMoreMeetings ? 'Show less' : 'Show more (${filtered.length - _maxVisibleMeetings} more)'),
                         ),
                       ),
+                    const SizedBox(height: 80),
                   ],
                 ),
               ),
@@ -663,40 +719,15 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
               ),
             ),
 
-          // Overlay when FAB is expanded
           if (_fabExpanded)
             GestureDetector(
               onTap: _toggleFAB,
-              child: Container(
-                color: Colors.black.withOpacity(0.3),
-              ),
+              child: Container(color: Colors.black.withOpacity(0.3)),
             ),
         ],
       ),
       floatingActionButton: _buildSmartFAB(),
-    );
-  }
-
-  Widget _buildShimmerPlaceholders() {
-    // shimmer depends on the 'shimmer' package
-    return Column(
-      children: List.generate(4, (i) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Shimmer.fromColors(
-            baseColor: Colors.grey.shade300,
-            highlightColor: Colors.grey.shade100,
-            child: Container(
-              height: 110,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.all(14),
-            ),
-          ),
-        );
-      }),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -718,65 +749,59 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Next Up',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 20),
-          ),
-          const SizedBox(height: 12),
-          if (_nextUp.isEmpty)
-            const Text(
-              'No upcoming meetings in next 7 days',
-              style: TextStyle(color: Colors.white70),
-            )
-          else
-            ..._nextUp.map((m) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          m.title,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          DateFormat('MMM d, h:mm a').format(m.datetime),
-                          style: const TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-          const SizedBox(height: 8),
           Row(
             children: [
-              const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
+                child: const Icon(Icons.schedule, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.event_available, color: Colors.white, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$_upcoming7DaysCount upcoming',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                    const Text(
+                      'Next Up',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18),
                     ),
+                    const SizedBox(height: 6),
+                    if (_nextUp.isEmpty)
+                      const Text('No upcoming meetings in next 7 days', style: TextStyle(color: Colors.white70))
+                    else
+                      ..._nextUp.map((m) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(m.title, style: const TextStyle(color: Colors.white, fontSize: 13), maxLines: 2, overflow: TextOverflow.ellipsis)),
+                            const SizedBox(width: 8),
+                            Text(DateFormat('MMM d').format(m.datetime), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                      )).toList(),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('${_upcoming7DaysCount}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                    const Text('upcoming', style: TextStyle(color: Colors.white70, fontSize: 10)),
                   ],
                 ),
               ),
@@ -787,13 +812,109 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
     );
   }
 
+  Widget _buildStatTiles() {
+    Widget tile(String title, String count) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: TextStyle(color: Colors.grey.shade700)),
+            const SizedBox(height: 8),
+            Text(count, style: TextStyle(color: themeStart, fontWeight: FontWeight.w800)),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: tile('Not Started', '5')),
+            const SizedBox(width: 12),
+            Expanded(child: tile('This Week', '3')),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: tile('Projects', '3')),
+            const SizedBox(width: 12),
+            Expanded(child: tile('Virtual', '1')),
+          ],
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Widget _buildShimmerPlaceholders() {
+    return Column(
+      children: List.generate(3, (i) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Shimmer.fromColors(
+            baseColor: Colors.grey.shade300,
+            highlightColor: Colors.grey.shade100,
+            child: Container(
+              height: 120,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(14),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
   Widget _buildSmartFAB() {
-    // Use smaller FABs and smaller icons
+    if (!_fabExpanded) {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [themeStart, themeEnd],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: themeEnd.withOpacity(0.35),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: FloatingActionButton.extended(
+          onPressed: () => _openAddEditSheet(),
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add),
+          label: const Text(
+            'Add Meeting',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+          heroTag: 'main_gradient',
+        ),
+      );
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Export button
         AnimatedOpacity(
           opacity: _fabExpanded ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
@@ -812,8 +933,6 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                 )
               : const SizedBox.shrink(),
         ),
-
-        // Bulk update button
         AnimatedOpacity(
           opacity: _fabExpanded ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
@@ -823,9 +942,7 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                   child: _SmallFAB(
                     onPressed: () {
                       _toggleFAB();
-                      // if selection exists, show actions; else open bulk dialog
                       if (_selectedIds.isNotEmpty) {
-                        // open popup to choose status
                         showMenu(
                           context: context,
                           position: const RelativeRect.fromLTRB(1000, 80, 8, 0),
@@ -847,18 +964,12 @@ class _MeetingsPageState extends State<MeetingsPage> with SingleTickerProviderSt
                 )
               : const SizedBox.shrink(),
         ),
-
-        // Main FAB (small)
         FloatingActionButton.small(
-          onPressed: _fabExpanded ? _toggleFAB : () => _openAddEditSheet(),
-          backgroundColor: themeStart,
-          heroTag: 'main',
-          tooltip: _fabExpanded ? 'Close' : 'Add meeting',
-          child: AnimatedRotation(
-            turns: _fabExpanded ? 0.125 : 0.0,
-            duration: const Duration(milliseconds: 200),
-            child: Icon(_fabExpanded ? Icons.close : Icons.add, size: 20),
-          ),
+          onPressed: _toggleFAB,
+          backgroundColor: themeEnd,
+          heroTag: 'main_close',
+          tooltip: 'Close',
+          child: const Icon(Icons.close, size: 18),
         ),
       ],
     );
@@ -913,15 +1024,13 @@ class _SmallFAB extends StatelessWidget {
       onPressed: onPressed,
       heroTag: heroTag,
       backgroundColor: Colors.white,
-      foregroundColor: const Color(0xFF4C1D95),
+      foregroundColor: const Color(0xFF065F46),
       elevation: 3,
       icon: Icon(icon, size: 16),
       label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
     );
   }
 }
-
-// MeetingCard and AddEditMeetingSheet implementations
 
 class MeetingCard extends StatelessWidget {
   final Meeting meeting;
@@ -957,10 +1066,14 @@ class MeetingCard extends StatelessWidget {
         ? meeting.location!.trim()
         : (meeting.isVirtual ? 'Online' : '');
 
+    final currentStatus = Meeting.validStatuses.contains(meeting.status)
+        ? meeting.status
+        : 'Not Started';
+
     return GestureDetector(
       onLongPress: onToggleSelect,
       child: Card(
-        color: isSelected ? Colors.grey.shade200 : null,
+        color: isSelected ? Colors.grey.shade100 : null,
         margin: const EdgeInsets.only(bottom: 12),
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -972,7 +1085,7 @@ class MeetingCard extends StatelessWidget {
               Row(
                 children: [
                   if (isSelected) ...[
-                    const Icon(Icons.check_circle, color: Colors.deepPurple, size: 18),
+                    const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 18),
                     const SizedBox(width: 8),
                   ],
                   Expanded(
@@ -999,8 +1112,8 @@ class MeetingCard extends StatelessWidget {
               Row(
                 children: [
                   DropdownButton<String>(
-                    value: meeting.status,
-                    items: ['Not Started', 'In Progress', 'Completed', 'Cancelled'].map((s) {
+                    value: currentStatus,
+                    items: Meeting.validStatuses.map((s) {
                       return DropdownMenuItem(value: s, child: Text(s));
                     }).toList(),
                     onChanged: (v) {
@@ -1009,7 +1122,7 @@ class MeetingCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   if (meeting.isVirtual)
-                    ElevatedButton.icon(
+                    _GradientPill(
                       onPressed: () async {
                         final link = meeting.meetLink;
                         if (link == null || link.trim().isEmpty) {
@@ -1031,13 +1144,8 @@ class MeetingCard extends StatelessWidget {
                           if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error opening link: $e')));
                         }
                       },
-                      icon: const Icon(Icons.video_call, size: 16),
-                      label: const Text('Join'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF6D28D9),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      ),
+                      icon: Icons.video_call,
+                      label: 'Join',
                     ),
                 ],
               ),
@@ -1052,11 +1160,51 @@ class MeetingCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3E8FF),
+        color: const Color(0xFFF0FDF4),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFF6D28D9).withOpacity(0.12)),
+        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.12)),
       ),
-      child: Text(text, style: const TextStyle(color: Color(0xFF4C1D95), fontSize: 11, fontWeight: FontWeight.w600)),
+      child: Text(text, style: const TextStyle(color: Color(0xFF065F46), fontSize: 11, fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+class _GradientPill extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData? icon;
+  final String label;
+
+  const _GradientPill({required this.onPressed, this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 38,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [themeStart, themeEnd], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [BoxShadow(color: themeEnd.withOpacity(0.18), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: Colors.white),
+                  const SizedBox(width: 8),
+                ],
+                Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1151,184 +1299,323 @@ class _AddEditMeetingSheetState extends State<AddEditMeetingSheet> {
     Navigator.of(context).pop(meeting);
   }
 
+  Future<void> _openStudentsPicker() async {
+    final selected = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final temp = Set<String>.from(_selectedStudents);
+        return SafeArea(
+          child: StatefulBuilder(builder: (context, setInner) {
+            return Container(
+              padding: const EdgeInsets.only(top: 12, left: 16, right: 16, bottom: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, -6))],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      const Text('Select students', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, null),
+                        style: TextButton.styleFrom(foregroundColor: pickerAccent),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // DONE -> gradient emerald pill
+                      InkWell(
+                        onTap: () => Navigator.pop(ctx, temp),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [themeStart, themeEnd],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: themeEnd.withOpacity(0.25),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: const Text(
+                            'Done',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    height: 360,
+                    child: SingleChildScrollView(
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: widget.students.map((s) {
+                          final sel = temp.contains(s);
+                          return ChoiceChip(
+                            label: Text(
+                              s,
+                              style: TextStyle(
+                                color: sel ? Colors.white : Colors.black87,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            selected: sel,
+                            onSelected: (v) {
+                              setInner(() {
+                                if (v) temp.add(s);
+                                else temp.remove(s);
+                              });
+                            },
+                            selectedColor: pickerAccent,
+                            backgroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: sel ? pickerAccent : Colors.grey.shade300),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        );
+      },
+    );
+
+    if (selected != null) {
+      setState(() => _selectedStudents = selected);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final display = _datetime == null ? 'Pick date & time' : DateFormat('EEE, MMM d • h:mm a').format(_datetime!);
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(widget.existing == null ? 'Add Meeting' : 'Edit Meeting',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                  const Spacer(),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _titleController,
-                decoration: InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey.shade50,
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Required';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _type,
-                      decoration: InputDecoration(
-                        labelText: 'Type',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        filled: true,
-                        fillColor: Colors.grey.shade50,
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'project', child: Text('Project')),
-                        DropdownMenuItem(value: 'office hours', child: Text('Office Hours')),
-                        DropdownMenuItem(value: 'advising', child: Text('Advising')),
-                        DropdownMenuItem(value: 'study group', child: Text('Study Group')),
-                      ],
-                      onChanged: (v) => setState(() => _type = v ?? 'project'),
+    final sheet = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, -6)),
+        ],
+      ),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+            const SizedBox(height: 10),
+
+            Row(
+              children: [
+                Text(widget.existing == null ? 'Schedule Meeting' : 'Edit Meeting', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [themeStart, themeEnd]),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6, offset: const Offset(0, 3))],
                     ),
+                    child: const Icon(Icons.close, color: Colors.white, size: 18),
                   ),
-                  const SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: _pickDateTime,
-                    icon: const Icon(Icons.calendar_today, size: 16),
-                    label: Text(display),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black87,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _purposeController,
-                decoration: InputDecoration(
-                  labelText: 'Purpose (optional)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey.shade50,
-                ),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _locationController,
-                decoration: InputDecoration(
-                  labelText: 'Location (leave empty if virtual)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey.shade50,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Text('Virtual meeting?'),
-                  const SizedBox(width: 12),
-                  Switch(
-                    value: _isVirtual,
-                    onChanged: (v) => setState(() {
-                      _isVirtual = v;
-                      if (!v) _meetLinkController.clear();
-                    }),
-                  ),
-                  const Spacer(),
-                  Text('${_selectedStudents.length} attendee(s)'),
-                ],
-              ),
-              if (_isVirtual) ...[
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _meetLinkController,
-                  decoration: InputDecoration(
-                    labelText: 'Meeting link',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                  ),
-                  validator: (v) {
-                    if (_isVirtual && (v == null || v.trim().isEmpty)) return 'Link required for virtual meetings';
-                    return null;
-                  },
                 ),
               ],
-              const SizedBox(height: 12),
-              const Text('Attendees (tap to toggle)', style: TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: widget.students.map((s) {
-                  final selected = _selectedStudents.contains(s);
-                  return ChoiceChip(
-                    label: Text(s),
-                    selected: selected,
-                    onSelected: (v) {
-                      setState(() {
-                        if (v) {
-                          _selectedStudents.add(s);
-                        } else {
-                          _selectedStudents.remove(s);
-                        }
-                      });
-                    },
-                  );
-                }).toList(),
+            ),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _titleController,
+              decoration: InputDecoration(
+                hintText: 'Title',
+                contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                filled: true,
+                fillColor: Colors.white,
               ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Required';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  flex: 6,
+                  child: DropdownButtonFormField<String>(
+                    value: _type,
+                    decoration: InputDecoration(
+                      labelText: 'Type',
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'project', child: Text('Project')),
+                      DropdownMenuItem(value: 'office hours', child: Text('Office Hours')),
+                      DropdownMenuItem(value: 'advising', child: Text('Advising')),
+                      DropdownMenuItem(value: 'study group', child: Text('Study Group')),
+                    ],
+                    onChanged: (v) => setState(() => _type = v ?? 'project'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 5,
+                  child: _GradientPill(
+                    onPressed: _pickDateTime,
+                    icon: Icons.calendar_today,
+                    label: _datetime == null ? 'Pick date & time' : DateFormat('EEE, MMM d • h:mm a').format(_datetime!),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _purposeController,
+              decoration: InputDecoration(
+                hintText: 'Purpose',
+                contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  flex: 7,
+                  child: TextFormField(
+                    controller: _locationController,
+                    decoration: InputDecoration(
+                      hintText: 'Location',
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 3,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      const Text('Virtual', style: TextStyle(fontSize: 14)),
+                      const SizedBox(width: 6),
+                      Switch(
+                        value: _isVirtual,
+                        onChanged: (v) => setState(() {
+                          _isVirtual = v;
+                          if (!v) _meetLinkController.clear();
+                        }),
+                        activeColor: themeStart,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            if (_isVirtual)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextFormField(
+                  controller: _meetLinkController,
+                  decoration: InputDecoration(
+                    hintText: 'Meeting link (leave blank to save without join link)',
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 6),
+
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: _openStudentsPicker,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(colors: [themeStart, themeEnd]),
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 6, offset: const Offset(0, 3))],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.group, color: Colors.white, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Students (${_selectedStudents.length})', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _save,
-                      child: const Text('Save'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF6D28D9),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 64,
+                  child: _GradientPill(
+                    onPressed: _save,
+                    label: 'Add',
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            const Text('Leave blank to save without a join link.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
+    );
+
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(child: sheet),
     );
   }
 }

@@ -29,11 +29,12 @@ import 'auth/signup.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   debugPaintSizeEnabled = false;
-  runApp(const MyApp());
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  // removed 'const' to avoid const constructor mismatch if any child widgets are not const
+  MyApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -44,36 +45,34 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.teal,
         useMaterial3: true,
       ),
-
       initialRoute: '/login',
-
       routes: {
         // AUTH
-        '/login': (context) => const LoginPage(),
-        '/signup': (context) => const SignUpPage(),
-        '/home': (context) => const RoleBasedHome(),
+        '/login': (context) => LoginPage(),
+        '/signup': (context) => SignUpPage(),
+        '/home': (context) => RoleBasedHome(),
 
-        // ADMIN ROUTES (unchanged)
-        '/admin/home': (context) => const RootScaffoldWithStylishNav(),
+        // ADMIN ROUTES
+        '/admin/home': (context) => RootScaffoldWithStylishNav(),
         '/dashboard': (context) => DashboardPage(),
-        '/planner': (context) => const planner.PlannerPage(),
-        '/calendar': (context) => const calendar.PlannerPage(),
+        '/planner': (context) => planner.PlannerPage(),
+        // using alias for calendar import
+        '/calendar': (context) => calendar.CalendarPage(),
         '/profile': (context) => ProfilePage(),
         '/meetings': (context) => MeetingsPage(),
         '/budget': (context) => BudgetPage(),
 
         // USER ROUTES
-        '/user/home': (context) => const UserRootScaffold(),
-        '/user/dashboard': (context) => const UserDashboardPage(),
-        '/user/profile': (context) => const UserProfilePage(),
+        '/user/home': (context) => UserRootScaffold(),
+        '/user/dashboard': (context) => UserDashboardPage(),
+        '/user/profile': (context) => UserProfilePage(),
 
         // NEW USER-SPECIFIC ROUTES
-        '/user/calendar': (context) => const UserCalendarPage(),
-        '/user/budget': (context) => const UserBudgetPage(),
-        '/user/planner': (context) => const UserPlannerPage(),
-        '/user/meetings': (context) => const UserMeetingsPage(),
+        '/user/calendar': (context) => UserCalendarPage(),
+        '/user/budget': (context) => UserBudgetPage(),
+        '/user/planner': (context) => UserPlannerPage(),
+        '/user/meetings': (context) => UserMeetingsPage(),
       },
-
       onUnknownRoute: (settings) {
         return MaterialPageRoute(
           builder: (_) => Scaffold(
@@ -87,7 +86,8 @@ class MyApp extends StatelessWidget {
 }
 
 class RoleBasedHome extends StatefulWidget {
-  const RoleBasedHome({super.key});
+  // removed const ctor for parity with children
+  RoleBasedHome({Key? key}) : super(key: key);
 
   @override
   State<RoleBasedHome> createState() => _RoleBasedHomeState();

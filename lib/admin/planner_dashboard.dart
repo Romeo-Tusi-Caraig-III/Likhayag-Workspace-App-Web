@@ -1,11 +1,11 @@
 // lib/admin/planner_dashboard.dart
-// Enhanced Planner with improved UI/UX: undo delete, drag handle + animations, filters, tag colors, calendar date view
+// Enhanced Planner with unified emerald gradient action buttons and updated Add Task sheet UI.
+// Bottom sheet UI matches the Meetings page (rounded sheet, emerald gradient buttons, pill-style actions).
 
-import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 
 class Task {
@@ -41,21 +41,8 @@ class Task {
       dueDateIso: (m['due'] ?? '').toString(),
       progress: int.tryParse(m['progress']?.toString() ?? '0') ?? 0,
       completed: m['completed'] == true,
-      createdAtIso: (m['created_at'] ?? DateTime.now().toIso8601String()).toString(),
-    );
-  }
-
-  factory Task.fromJson(Map<String, dynamic> m) {
-    return Task(
-      id: m['id']?.toString() ?? UniqueKey().toString(),
-      title: (m['title'] ?? '').toString(),
-      desc: (m['desc'] ?? '').toString(),
-      type: (m['type'] ?? 'assignment').toString(),
-      priority: (m['priority'] ?? 'medium').toString(),
-      dueDateIso: (m['dueDateIso'] ?? '').toString(),
-      progress: m['progress'] ?? 0,
-      completed: m['completed'] ?? false,
-      createdAtIso: (m['createdAtIso'] ?? DateTime.now().toIso8601String()).toString(),
+      createdAtIso:
+          (m['created_at'] ?? DateTime.now().toIso8601String()).toString(),
     );
   }
 
@@ -70,19 +57,11 @@ class Task {
       'completed': completed,
     };
   }
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'desc': desc,
-        'type': type,
-        'priority': priority,
-        'dueDateIso': dueDateIso,
-        'progress': progress,
-        'completed': completed,
-        'createdAtIso': createdAtIso,
-      };
 }
+
+// Shared gradient colors used across app pages
+const Color themeStart = Color(0xFF10B981); // emerald-500
+const Color themeEnd = Color(0xFF059669); // emerald-600
 
 class PlannerPage extends StatefulWidget {
   const PlannerPage({super.key});
@@ -93,7 +72,8 @@ class PlannerPage extends StatefulWidget {
 
 enum SortBy { due, priority, created }
 
-class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderStateMixin {
+class _PlannerHomePage extends State<PlannerPage>
+    with SingleTickerProviderStateMixin {
   final List<Task> tasks = [];
   String currentTab = 'all';
   String search = '';
@@ -102,9 +82,6 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
 
   bool _isLoading = false;
   bool _isRefreshing = false;
-  bool _fabExpanded = false;
-  late AnimationController _fabController;
-  late Animation<double> _fabScale;
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _titleCtl = TextEditingController();
@@ -116,53 +93,16 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
   String? _editingId;
   DateTime? _pickedDate;
 
-  static const Color segEmerald = Color(0xFF059669);
+  // keep older segEmerald constant for places that used it
+  static const Color segEmerald = themeEnd;
   final int _maxVisibleTasks = 6;
   bool _showMoreTasks = false;
-
-  // Local cache key
-  static const String _cacheKey = 'planner_tasks_cache_v1';
-
-  // Undo delete state
-  Task? _lastRemovedTask;
-  int? _lastRemovedIndex;
-
-  // Filters
-  final Set<String> _typeFilters = {}; // e.g. 'assignment','project'
-  final Set<String> _priorityFilters = {}; // 'high','medium','low'
-
-  // Tag colors
-  final Map<String, Color> _typeColor = {
-    'assignment': Colors.blue.shade100,
-    'study': Colors.purple.shade100,
-    'project': Colors.teal.shade100,
-    'exam': Colors.amber.shade100,
-  };
-
-  final Map<String, Color> _priorityColorBg = {
-    'high': Colors.red.shade100,
-    'medium': Colors.orange.shade100,
-    'low': Colors.green.shade100,
-  };
-
-  final Map<String, Color> _priorityColorText = {
-    'high': Colors.red.shade700,
-    'medium': Colors.orange.shade800,
-    'low': Colors.green.shade800,
-  };
 
   @override
   void initState() {
     super.initState();
     dateFormatter = DateFormat.yMMMEd();
-    _fabController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    _fabScale = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _fabController, curve: Curves.easeOut));
-
-    // Load cached tasks immediately for snappy UI, then refresh from API
-    _loadCachedTasks().then((_) => _loadTasksFromApi());
+    _loadTasksFromApi();
   }
 
   @override
@@ -170,33 +110,7 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
     _titleCtl.dispose();
     _descCtl.dispose();
     _dueDateCtl.dispose();
-    _fabController.dispose();
     super.dispose();
-  }
-
-  Future<void> _saveCache() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final list = tasks.map((t) => t.toJson()).toList();
-      await prefs.setString(_cacheKey, jsonEncode(list));
-    } catch (e) {
-      // ignore cache errors
-    }
-  }
-
-  Future<void> _loadCachedTasks() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_cacheKey);
-      if (raw == null) return;
-      final list = jsonDecode(raw) as List<dynamic>;
-      setState(() {
-        tasks.clear();
-        tasks.addAll(list.map((m) => Task.fromJson(Map<String, dynamic>.from(m))));
-      });
-    } catch (e) {
-      // ignore
-    }
   }
 
   Future<void> _loadTasksFromApi() async {
@@ -214,12 +128,10 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
         }
         _isLoading = false;
       });
-
-      await _saveCache();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _showSnack('Failed to load tasks: $e — showing cached data');
+      _showSnack('Failed to load tasks: $e');
     }
   }
 
@@ -238,12 +150,10 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
         }
         _isRefreshing = false;
       });
-      await _saveCache();
       _showSnack('Data refreshed');
     } catch (e) {
       if (!mounted) return;
       setState(() => _isRefreshing = false);
-      _showSnack('Refresh failed — showing cached data');
     }
   }
 
@@ -259,13 +169,11 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
       }
     } catch (e) {
       _showSnack('Error: $e');
-      // add locally to keep the user flow smooth
-      setState(() => tasks.insert(0, task));
-      await _saveCache();
     }
   }
 
-  Future<void> _updateTaskApi(String taskId, Map<String, dynamic> updates) async {
+  Future<void> _updateTaskApi(
+      String taskId, Map<String, dynamic> updates) async {
     try {
       final result = await ApiService.updateTask(taskId, updates);
 
@@ -276,13 +184,6 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
       }
     } catch (e) {
       _showSnack('Error: $e');
-      // optimistic update for local cache
-      final idx = tasks.indexWhere((t) => t.id == taskId);
-      if (idx != -1) {
-        final t = tasks[idx];
-        if (updates.containsKey('completed')) t.completed = updates['completed'];
-        await _saveCache();
-      }
     }
   }
 
@@ -297,9 +198,7 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
         _showSnack('Failed: ${result['message']}');
       }
     } catch (e) {
-      _showSnack('Error: $e — removed locally');
-      setState(() => tasks.removeWhere((t) => t.id == taskId));
-      await _saveCache();
+      _showSnack('Error: $e');
     }
   }
 
@@ -339,36 +238,16 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
         await ApiService.updateTask(task.id, {'completed': true});
         completed++;
       } catch (e) {
-        // Continue with others but also update locally
-        task.completed = true;
+        // Continue with others
       }
     }
 
-    await _saveCache();
     await _loadTasksFromApi();
     _showSnack('Completed $completed task(s)');
   }
 
   Future<void> _exportTasks() async {
-    if (tasks.isEmpty) {
-      _showSnack('No tasks to export');
-      return;
-    }
-
-    final csv = StringBuffer();
-    csv.writeln('id,title,notes,type,priority,due,completed,created_at');
-    for (var t in tasks) {
-      csv.writeln('"${t.id}","${t.title.replaceAll('"', '""')}","${t.desc.replaceAll('"', '""')}","${t.type}","${t.priority}","${t.dueDateIso}","${t.completed}","${t.createdAtIso}"');
-    }
-
-    await showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('CSV Preview'),
-        content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: Text(csv.toString()))),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-      ),
-    );
+    _showSnack('Exporting tasks... (Feature coming soon)');
   }
 
   Future<void> _archiveCompleted() async {
@@ -407,26 +286,12 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
         await ApiService.deleteTask(task.id);
         archived++;
       } catch (e) {
-        // remove locally
-        tasks.remove(task);
-        archived++;
+        // Continue
       }
     }
 
-    await _saveCache();
     await _loadTasksFromApi();
     _showSnack('Archived $archived task(s)');
-  }
-
-  void _toggleFAB() {
-    setState(() {
-      _fabExpanded = !_fabExpanded;
-      if (_fabExpanded) {
-        _fabController.forward();
-      } else {
-        _fabController.reverse();
-      }
-    });
   }
 
   void _showSnack(String msg) {
@@ -460,10 +325,9 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
   List<Task> getFilteredSorted() {
     final q = search.trim().toLowerCase();
     var list = tasks.where((t) {
-      final matchesSearch = q.isEmpty || t.title.toLowerCase().contains(q) || t.desc.toLowerCase().contains(q);
+      final matchesSearch =
+          q.isEmpty || t.title.toLowerCase().contains(q) || t.desc.toLowerCase().contains(q);
       if (!matchesSearch) return false;
-      if (_typeFilters.isNotEmpty && !_typeFilters.contains(t.type)) return false;
-      if (_priorityFilters.isNotEmpty && !_priorityFilters.contains(t.priority)) return false;
       if (currentTab == 'pending') return !t.completed;
       if (currentTab == 'completed') return t.completed;
       if (currentTab == 'high') return t.priority == 'high';
@@ -529,64 +393,80 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return AnimatedPadding(
-          duration: const Duration(milliseconds: 150),
+        // New bottom sheet design — rounded, shadowed, with gradient close and gradient controls
+        return Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            decoration: BoxDecoration(
+              color: Theme.of(ctx).colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, -6))],
             ),
             child: SafeArea(
               top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: SingleChildScrollView(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Form(
                     key: _formKey,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // grabber
+                        Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
                         Row(
                           children: [
                             Expanded(
-                              child: Text(_editingId == null ? 'Add Task' : 'Edit Task',
-                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                            ),
-                            InkWell(
-                              onTap: () => Navigator.pop(ctx),
-                              child: Container(
-                                width: 36,
-                                height: 36,
-                                decoration: const BoxDecoration(color: segEmerald, shape: BoxShape.circle),
-                                child: const Icon(Icons.close, color: Colors.white, size: 18),
+                              child: Text(
+                                _editingId == null ? 'Add Task' : 'Edit Task',
+                                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
                               ),
                             ),
+                            GestureDetector(
+                              onTap: () => Navigator.pop(ctx),
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(colors: [themeStart, themeEnd], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [BoxShadow(color: themeEnd.withOpacity(0.12), blurRadius: 6, offset: const Offset(0, 3))],
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white, size: 18),
+                              ),
+                            )
                           ],
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
+
+                        // Title
                         TextFormField(
                           controller: _titleCtl,
                           decoration: InputDecoration(
-                            labelText: 'Title',
+                            hintText: 'Title',
+                            contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                             filled: true,
-                            fillColor: Colors.grey.shade50,
+                            fillColor: Colors.white,
                           ),
                           validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
                         ),
                         const SizedBox(height: 12),
+
+                        // Type dropdown + Due Date pill
                         Row(
                           children: [
                             Expanded(
+                              flex: 6,
                               child: DropdownButtonFormField<String>(
                                 value: _type,
                                 decoration: InputDecoration(
                                   labelText: 'Type',
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                                   filled: true,
-                                  fillColor: Colors.grey.shade50,
+                                  fillColor: Colors.white,
                                 ),
                                 items: const [
                                   DropdownMenuItem(value: 'assignment', child: Text('Assignment')),
@@ -597,42 +477,41 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
                                 onChanged: (v) => setState(() => _type = v ?? 'assignment'),
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 10),
                             Expanded(
-                              child: OutlinedButton.icon(
+                              flex: 5,
+                              child: _GradientPill(
                                 onPressed: () async {
                                   final picked = await showDatePicker(
-                                    context: context,
+                                    context: ctx,
                                     initialDate: _pickedDate ?? DateTime.now(),
                                     firstDate: DateTime(2020),
                                     lastDate: DateTime(2030),
                                   );
                                   if (picked != null) {
-                                    _pickedDate = picked;
-                                    _dueDateCtl.text = DateFormat('yyyy-MM-dd').format(picked);
-                                    setState(() {});
+                                    setState(() {
+                                      _pickedDate = picked;
+                                      _dueDateCtl.text = DateFormat('yyyy-MM-dd').format(picked);
+                                    });
                                   }
                                 },
-                                style: OutlinedButton.styleFrom(
-                                  backgroundColor: segEmerald,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                ),
-                                icon: const Icon(Icons.calendar_today, size: 16),
-                                label: Text(_dueDateCtl.text.isEmpty ? 'Due Date' : _dueDateCtl.text,
-                                    style: const TextStyle(fontSize: 12)),
+                                icon: Icons.calendar_today,
+                                label: _dueDateCtl.text.isEmpty ? 'Due Date' : _dueDateCtl.text,
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
+
+                        // Priority
                         DropdownButtonFormField<String>(
                           value: _priority,
                           decoration: InputDecoration(
                             labelText: 'Priority',
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                             filled: true,
-                            fillColor: Colors.grey.shade50,
+                            fillColor: Colors.white,
                           ),
                           items: const [
                             DropdownMenuItem(value: 'low', child: Text('Low')),
@@ -642,36 +521,47 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
                           onChanged: (v) => setState(() => _priority = v ?? 'medium'),
                         ),
                         const SizedBox(height: 12),
+
+                        // Description
                         TextFormField(
                           controller: _descCtl,
                           decoration: InputDecoration(
-                            labelText: 'Description',
+                            hintText: 'Description',
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                             filled: true,
-                            fillColor: Colors.grey.shade50,
+                            fillColor: Colors.white,
                           ),
                           maxLines: 3,
                         ),
                         const SizedBox(height: 12),
+
                         Row(
                           children: [
                             Checkbox(value: _completed, onChanged: (v) => setState(() => _completed = v ?? false)),
                             const Text('Mark completed'),
                           ],
                         ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 16),
+
+                        // Actions: Cancel (outlined) + Add (gradient pill)
                         Row(
                           children: [
                             Expanded(
                               child: OutlinedButton(
                                 onPressed: () => Navigator.pop(ctx),
-                                child: const Text('Cancel'),
+                                style: OutlinedButton.styleFrom(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                ),
+                                child: const Text('Cancel', style: TextStyle(color: Colors.black87)),
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: ElevatedButton(
-                                onPressed: () async {
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () async {
                                   if (!_formKey.currentState!.validate()) return;
                                   if (_pickedDate == null) {
                                     _showSnack('Select a due date');
@@ -679,7 +569,7 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
                                   }
 
                                   final task = Task(
-                                    id: _editingId ?? UniqueKey().toString(),
+                                    id: _editingId ?? '',
                                     title: _titleCtl.text.trim(),
                                     desc: _descCtl.text.trim(),
                                     type: _type,
@@ -691,25 +581,26 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
                                   );
 
                                   Navigator.pop(ctx);
-
-                                  if (_editingId != null && _editingId!.isNotEmpty) {
+                                  if (_editingId != null) {
                                     await _updateTaskApi(_editingId!, task.toApi());
                                   } else {
                                     await _createTaskApi(task);
                                   }
-
-                                  // reset quick fields
-                                  setState(() {
-                                    _pickedDate = null;
-                                    _dueDateCtl.clear();
-                                  });
                                 },
-                                style: ElevatedButton.styleFrom(backgroundColor: segEmerald, foregroundColor: Colors.white),
-                                child: Text(_editingId == null ? 'Add' : 'Save'),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(colors: [themeStart, themeEnd], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [BoxShadow(color: themeEnd.withOpacity(0.24), blurRadius: 10, offset: const Offset(0, 6))],
+                                  ),
+                                  child: const Center(child: Text('Add', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700))),
+                                ),
                               ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
                       ],
                     ),
                   ),
@@ -739,53 +630,7 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
         ],
       ),
     );
-    if (ok == true) {
-      final idx = tasks.indexWhere((x) => x.id == t.id);
-      if (idx != -1) {
-        _performLocalRemoveWithUndo(idx);
-      }
-    }
-  }
-
-  // Remove locally and show undo SnackBar. If not undone, perform remote delete.
-  void _performLocalRemoveWithUndo(int index) {
-    _lastRemovedTask = tasks[index];
-    _lastRemovedIndex = index;
-    setState(() => tasks.removeAt(index));
-    _saveCache();
-
-    final controller = ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Task removed'),
-        duration: const Duration(seconds: 4),
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(label: 'Undo', onPressed: () {
-          // undo
-          if (_lastRemovedTask != null && _lastRemovedIndex != null) {
-            setState(() {
-              tasks.insert(_lastRemovedIndex!, _lastRemovedTask!);
-              _lastRemovedTask = null;
-              _lastRemovedIndex = null;
-            });
-            _saveCache();
-          }
-        }),
-      ),
-    );
-
-    controller.closed.then((reason) async {
-      // if user pressed undo, _lastRemovedTask will be null
-      if (_lastRemovedTask != null) {
-        final id = _lastRemovedTask!.id;
-        try {
-          await ApiService.deleteTask(id);
-        } catch (_) {
-          // ignore network error; cache already updated
-        }
-        _lastRemovedTask = null;
-        _lastRemovedIndex = null;
-      }
-    });
+    if (ok == true) await _deleteTaskApi(t.id);
   }
 
   Widget _taskSegmentedControl(List<String> tabs) {
@@ -846,229 +691,117 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
     );
   }
 
-  Widget _chipSelectable(String text, Color bg, bool selected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? bg : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: selected ? Colors.transparent : Colors.grey.shade200),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : Colors.black87),
-        ),
+  Widget _chip(String text, Color bg, {Color? textColor}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor ?? Colors.black87),
       ),
     );
   }
 
-  Widget _taskCard(Task t, int index) {
+  Color _priorityColor(String p) {
+    if (p == 'high') return Colors.red.shade100;
+    if (p == 'low') return Colors.green.shade100;
+    return Colors.orange.shade100;
+  }
+
+  Widget _taskCard(Task t) {
     final diff = daysDiff(t.dueDateIso);
     final overdue = diff < 0;
-
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 220),
-      child: Dismissible(
-        key: ValueKey(t.id),
-        background: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          alignment: Alignment.centerLeft,
-          color: Colors.red.shade400,
-          child: const Icon(Icons.delete, color: Colors.white),
-        ),
-        secondaryBackground: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          alignment: Alignment.centerRight,
-          color: Colors.red.shade400,
-          child: const Icon(Icons.delete, color: Colors.white),
-        ),
-        confirmDismiss: (dir) async {
-          final ok = await showDialog<bool>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Delete'),
-              content: const Text('Delete this task?'),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-              ],
-            ),
-          );
-          return ok == true;
-        },
-        onDismissed: (_) async {
-          // use undo flow
-          final realIndex = index;
-          _performLocalRemoveWithUndo(realIndex);
-        },
-        child: Container(
-          width: double.infinity,
-          margin: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF6EEF8),
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6EEF8),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Drag handle
-                ReorderableDragStartListener(
-                  index: index,
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 8, top: 6),
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
-                    child: const Icon(Icons.drag_handle, size: 18, color: Colors.black54),
-                  ),
-                ),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(t.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  const SizedBox(height: 8),
+                  if (t.desc.isNotEmpty)
+                    Text(t.desc, style: TextStyle(fontSize: 13, color: Colors.grey.shade700), maxLines: 2),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      Row(
-                        children: [
-                          Expanded(child: Text(t.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-                          const SizedBox(width: 8),
-                          Text(fmtDate(t.dueDateIso), style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (t.desc.isNotEmpty)
-                        Text(t.desc, style: TextStyle(fontSize: 13, color: Colors.grey.shade700), maxLines: 2),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          // Type chip with color
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _typeColor[t.type] ?? Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(t.type, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      _chip(t.type, Colors.white, textColor: Colors.black87),
+                      _chip(t.priority, _priorityColor(t.priority)),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: overdue ? Colors.red.shade50 : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          overdue ? '${diff.abs()}d overdue' : '$diff d left',
+                          style: TextStyle(
+                            color: overdue ? Colors.red.shade700 : Colors.grey.shade800,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
-
-                          // Priority chip
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _priorityColorBg[t.priority] ?? Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              t.priority,
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _priorityColorText[t.priority]),
-                            ),
-                          ),
-
-                          // Due chip
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: overdue ? Colors.red.shade50 : Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              overdue ? '${diff.abs()}d overdue' : '$diff d left',
-                              style: TextStyle(
-                                color: overdue ? Colors.red.shade700 : Colors.grey.shade800,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
+                ],
+              ),
+            ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: () => _openAddDialog(edit: t),
+                  borderRadius: BorderRadius.circular(8),
+                  child: const Padding(
+                    padding: EdgeInsets.all(6.0),
+                    child: Icon(Icons.edit, color: Colors.green, size: 20),
+                  ),
                 ),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    InkWell(
-                      onTap: () => _openAddDialog(edit: t),
-                      borderRadius: BorderRadius.circular(8),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6.0),
-                        child: Icon(Icons.edit, color: segEmerald, size: 20),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () => _confirmDelete(t),
-                      borderRadius: BorderRadius.circular(8),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6.0),
-                        child: Icon(Icons.delete, color: Colors.red, size: 20),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Transform.scale(
-                      scale: 1.1,
-                      child: Checkbox(
-                        value: t.completed,
-                        onChanged: (v) async {
-                          setState(() => t.completed = v ?? false);
-                          await _saveCache();
-                          await _updateTaskApi(t.id, {'completed': v ?? false});
-                        },
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        activeColor: segEmerald,
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () => _confirmDelete(t),
+                  borderRadius: BorderRadius.circular(8),
+                  child: const Padding(
+                    padding: EdgeInsets.all(6.0),
+                    child: Icon(Icons.delete, color: Colors.red, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Transform.scale(
+                  scale: 1.1,
+                  child: Checkbox(
+                    value: t.completed,
+                    onChanged: (v) => _updateTaskApi(t.id, {'completed': v ?? false}),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                    activeColor: segEmerald,
+                  ),
                 ),
               ],
             ),
-          ),
+          ],
         ),
-      ),
-    );
-  }
-
-  // Calendar: pick a date and show tasks for that day
-  Future<void> _openCalendarView() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-
-    if (picked == null) return;
-
-    final list = tasks.where((t) {
-      final d = DateTime.tryParse(t.dueDateIso);
-      if (d == null) return false;
-      return d.year == picked.year && d.month == picked.month && d.day == picked.day;
-    }).toList();
-
-    await showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Tasks on ${DateFormat.yMMMd().format(picked)}'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: list.isEmpty
-              ? const Text('No tasks on this date')
-              : SingleChildScrollView(child: Column(children: list.map((t) => ListTile(title: Text(t.title), subtitle: Text(t.desc))).toList())),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
       ),
     );
   }
@@ -1092,6 +825,29 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
     );
   }
 
+  Future<void> _confirmShowMore(int remaining) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Show more tasks?'),
+        content: Text('There are $remaining more task(s). Show them?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: segEmerald),
+            child: const Text('Show'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      setState(() => _showMoreTasks = true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = getFilteredSorted();
@@ -1099,23 +855,22 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
     final visible = _showMoreTasks ? filtered : filtered.take(_maxVisibleTasks).toList();
 
     final tabs = ['all', 'pending', 'completed', 'high'];
+    final remaining = filtered.length > _maxVisibleTasks ? filtered.length - _maxVisibleTasks : 0;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7FBF7),
-      body: Stack(
-        children: [
-          SafeArea(
-            child: RefreshIndicator(
-              onRefresh: _refreshTasks,
-              child: SingleChildScrollView(
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _refreshTasks,
+          child: Stack(
+            children: [
+              SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 140),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 8),
-
-                    // Stats at top
                     Row(
                       children: [
                         Expanded(child: _statTileColored('Pending', stats['pending']!, Colors.blue.shade400)),
@@ -1127,9 +882,7 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
                         Expanded(child: _statTileColored('Overdue', stats['overdue']!, Colors.orange.shade400)),
                       ],
                     ),
-
                     const SizedBox(height: 18),
-
                     Row(
                       children: [
                         const Text('Planner', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
@@ -1138,271 +891,213 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
                           icon: _isLoading
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                               : const Icon(Icons.refresh),
-                          onPressed: _isLoading ? null : _refreshTasks,
+                          onPressed: _isLoading ? null : _loadTasksFromApi,
+                        ),
+                        PopupMenuButton<String>(
+                          onSelected: (v) {
+                            setState(() {
+                              if (v == 'export') {
+                                _exportTasks();
+                              } else if (v == 'archive') {
+                                _archiveCompleted();
+                              } else if (v == 'sort_due') {
+                                sortBy = SortBy.due;
+                              } else if (v == 'sort_priority') {
+                                sortBy = SortBy.priority;
+                              } else if (v == 'sort_created') {
+                                sortBy = SortBy.created;
+                              }
+                            });
+                          },
+                          itemBuilder: (ctx) => [
+                            const PopupMenuItem(value: 'export', child: Text('Export')),
+                            const PopupMenuItem(value: 'archive', child: Text('Archive completed')),
+                            const PopupMenuDivider(),
+                            const PopupMenuItem(value: 'sort_due', child: Text('Sort: Due date')),
+                            const PopupMenuItem(value: 'sort_priority', child: Text('Sort: Priority')),
+                            const PopupMenuItem(value: 'sort_created', child: Text('Sort: Created')),
+                          ],
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 12),
-
-                    // Search + Sort + Calendar row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.search, size: 20, color: Colors.black54),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: TextField(
-                                    onChanged: (v) => setState(() => search = v),
-                                    decoration: const InputDecoration(border: InputBorder.none, hintText: 'Search tasks...'),
-                                  ),
-                                ),
-                                if (search.isNotEmpty)
-                                  InkWell(
-                                    onTap: () => setState(() => search = ''),
-                                    child: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.close, size: 18)),
-                                  )
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Container(
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                          child: PopupMenuButton<SortBy>(
-                            onSelected: (s) => setState(() => sortBy = s),
-                            itemBuilder: (_) => [
-                              const PopupMenuItem(value: SortBy.due, child: Text('Sort by Due')),
-                              const PopupMenuItem(value: SortBy.priority, child: Text('Sort by Priority')),
-                              const PopupMenuItem(value: SortBy.created, child: Text('Sort by Created')),
-                            ],
-                            icon: const Icon(Icons.sort),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                          child: IconButton(onPressed: _openCalendarView, icon: const Icon(Icons.calendar_today)),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // Filters row
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          const SizedBox(width: 4),
-                          _chipSelectable('All types', Colors.blue, _typeFilters.isEmpty, () => setState(() => _typeFilters.clear())),
-                          const SizedBox(width: 8),
-                          ..._typeColor.keys.map((k) => Padding(padding: const EdgeInsets.only(right: 8), child: _chipSelectable(k, _typeColor[k]!, _typeFilters.contains(k), () => setState(() => _typeFilters.contains(k) ? _typeFilters.remove(k) : _typeFilters.add(k))))).toList(),
-                          const SizedBox(width: 12),
-                          _chipSelectable('All priorities', Colors.orange, _priorityFilters.isEmpty, () => setState(() => _priorityFilters.clear())),
-                          const SizedBox(width: 8),
-                          ..._priorityColorBg.keys.map((k) => Padding(padding: const EdgeInsets.only(right: 8), child: _chipSelectable(k, _priorityColorBg[k]!, _priorityFilters.contains(k), () => setState(() => _priorityFilters.contains(k) ? _priorityFilters.remove(k) : _priorityFilters.add(k))))).toList(),
-                        ],
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search tasks...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.white,
                       ),
+                      onChanged: (v) => setState(() => search = v),
                     ),
-
                     const SizedBox(height: 12),
-
                     _taskSegmentedControl(tabs),
-
                     const SizedBox(height: 12),
-
-                    // Task list
-                    if (filtered.isEmpty)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 40),
+                    if (filtered.isEmpty && !_isLoading)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        child: Center(
                           child: Column(
                             children: [
-                              Icon(Icons.inbox, size: 48, color: Colors.grey.shade400),
+                              const Icon(Icons.inbox, size: 48, color: Colors.grey),
                               const SizedBox(height: 12),
-                              Text('No tasks yet', style: TextStyle(color: Colors.grey.shade600)),
-                              const SizedBox(height: 8),
-                              ElevatedButton.icon(
-                                onPressed: () => _openAddDialog(),
-                                icon: const Icon(Icons.add),
-                                label: const Text('Add your first task'),
-                                style: ElevatedButton.styleFrom(backgroundColor: segEmerald),
-                              )
+                              Text('No tasks found', style: TextStyle(color: Colors.grey.shade700)),
                             ],
                           ),
                         ),
                       )
-                    else
-                      // Reorderable list for drag-and-drop with handles and animated size
-                      ReorderableListView.builder(
+                    else ...[
+                      ListView.builder(
+                        itemCount: visible.length,
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        itemCount: filtered.length,
-                        onReorder: (oldIndex, newIndex) async {
-                          if (oldIndex < newIndex) newIndex -= 1;
-                          final moving = filtered[oldIndex];
-                          final oldReal = tasks.indexWhere((t) => t.id == moving.id);
-
-                          // compute newReal as the position of the item at newIndex in filtered list mapped to tasks
-                          int newReal;
-                          if (newIndex >= filtered.length) {
-                            newReal = tasks.length - 1;
-                          } else {
-                            final nextItem = filtered[newIndex];
-                            newReal = tasks.indexWhere((t) => t.id == nextItem.id);
-                          }
-
-                          setState(() {
-                            final t = tasks.removeAt(oldReal);
-                            final insertAt = newReal > oldReal ? newReal : newReal;
-                            tasks.insert(insertAt, t);
-                          });
-
-                          await _saveCache();
-                        },
-                        buildDefaultDragHandles: false, // we use our own handles
-                        itemBuilder: (ctx, idx) {
-                          final t = filtered[idx];
-                          final realIndex = tasks.indexWhere((x) => x.id == t.id);
-                          return Padding(
-                            key: ValueKey(t.id),
-                            padding: const EdgeInsets.symmetric(horizontal: 0),
-                            child: _taskCard(t, realIndex),
-                          );
+                        itemBuilder: (context, index) {
+                          final t = visible[index];
+                          return _taskCard(t);
                         },
                       ),
-
+                      if (filtered.length > _maxVisibleTasks)
+                        TextButton(
+                          onPressed: () {
+                            if (!_showMoreTasks) {
+                              _confirmShowMore(remaining);
+                            } else {
+                              setState(() => _showMoreTasks = false);
+                            }
+                          },
+                          child: Text(_showMoreTasks ? 'Show less' : 'Show more (${filtered.length - _maxVisibleTasks})'),
+                        ),
+                    ],
                     const SizedBox(height: 12),
-                    if (filtered.length > _maxVisibleTasks)
-                      TextButton(
-                        onPressed: () => setState(() => _showMoreTasks = !_showMoreTasks),
-                        child: Text(_showMoreTasks ? 'Show less' : 'Show more'),
-                      ),
-
-                    const SizedBox(height: 100), // space for FAB
                   ],
                 ),
               ),
-            ),
-          ),
 
-          // FAB overlay when expanded
-          if (_fabExpanded)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleFAB,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  opacity: _fabExpanded ? 0.6 : 0.0,
-                  child: Container(color: Colors.black54),
-                ),
-              ),
-            ),
-        ],
-      ),
-
-      floatingActionButton: SizedBox(
-        width: 240,
-        height: 56,
-        child: Stack(
-          alignment: Alignment.bottomRight,
-          children: [
-            // Expanded actions
-            Positioned(
-              right: 0,
-              bottom: 64,
-              child: ScaleTransition(
-                scale: _fabScale,
+              // Bottom-right unified gradient action buttons (Archive circular + Add Task pill)
+              Positioned(
+                right: 18,
+                bottom: 18,
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    FloatingActionButton.extended(
-                      heroTag: 'bulk',
-                      onPressed: () {
-                        _toggleFAB();
-                        _bulkComplete();
-                      },
-                      label: const Text('Complete all'),
-                      icon: const Icon(Icons.done_all),
-                      backgroundColor: Colors.blue,
+
+                    // ARCHIVE — circular gradient button
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [themeStart, themeEnd],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: themeEnd.withOpacity(0.28),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: FloatingActionButton(
+                          heroTag: 'archiveFab',
+                          onPressed: _archiveCompleted,
+                          backgroundColor: Colors.transparent,
+                          elevation: 0,
+                          child: const Icon(Icons.archive, color: Colors.white),
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    FloatingActionButton.extended(
-                      heroTag: 'export',
-                      onPressed: () {
-                        _toggleFAB();
-                        _exportTasks();
-                      },
-                      label: const Text('Export'),
-                      icon: const Icon(Icons.file_download),
-                      backgroundColor: Colors.orange,
-                    ),
-                    const SizedBox(height: 8),
-                    FloatingActionButton.extended(
-                      heroTag: 'archive',
-                      onPressed: () {
-                        _toggleFAB();
-                        _archiveCompleted();
-                      },
-                      label: const Text('Archive done'),
-                      icon: const Icon(Icons.archive),
-                      backgroundColor: Colors.green,
+
+                    // ADD TASK — emerald gradient pill (same style)
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [themeStart, themeEnd],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(30),
+                        boxShadow: [
+                          BoxShadow(
+                            color: themeEnd.withOpacity(0.26),
+                            blurRadius: 14,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: FloatingActionButton.extended(
+                        heroTag: 'addTaskFab',
+                        onPressed: () => _openAddDialog(),
+                        backgroundColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        icon: const Icon(Icons.add),
+                        label: const Text(
+                          'Add Task',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-            // Primary FAB
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: FloatingActionButton(
-                onPressed: _toggleFAB,
-                backgroundColor: segEmerald,
-                child: AnimatedBuilder(
-                  animation: _fabController,
-                  builder: (_, __) {
-                    return Transform.rotate(
-                      angle: _fabController.value * 0.5,
-                      child: Icon(_fabExpanded ? Icons.close : Icons.menu),
-                    );
-                  },
-                ),
-              ),
-            ),
+/// Reusable gradient pill used for Due Date / Join / small gradient buttons
+class _GradientPill extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData? icon;
+  final String label;
+  final EdgeInsetsGeometry? padding;
 
-            // Quick-add pill fixed and improved
-            Positioned(
-              right: 100,
-              bottom: 6,
-              child: GestureDetector(
-                onTap: () => _openAddDialog(),
-                child: Material(
-                  elevation: 6,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.add, size: 18, color: segEmerald),
-                        const SizedBox(width: 8),
-                        const Text('Quick add', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
+  const _GradientPill({
+    required this.onPressed,
+    this.icon,
+    required this.label,
+    this.padding,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [themeStart, themeEnd], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: themeEnd.withOpacity(0.18), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: padding ?? const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: Colors.white),
+                  const SizedBox(width: 8),
+                ],
+                Flexible(
+                  child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

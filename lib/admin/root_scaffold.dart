@@ -25,7 +25,7 @@ class _RootScaffoldWithStylishNavState
   // when the navigation order is changed.
   final List<Widget> _pages = <Widget>[
     KeyedSubtree(key: ValueKey('page_dashboard'), child: DashboardPage()),
-    KeyedSubtree(key: ValueKey('page_calendar'), child: const calendar.PlannerPage()),
+    KeyedSubtree(key: ValueKey('page_calendar'), child: CalendarPage()),
     KeyedSubtree(key: ValueKey('page_planner'), child: const planner.PlannerPage()),
     KeyedSubtree(key: ValueKey('page_budget'), child: BudgetPage()),
     KeyedSubtree(key: ValueKey('page_meetings'), child: MeetingsPage()),

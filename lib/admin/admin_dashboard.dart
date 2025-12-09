@@ -1,5 +1,5 @@
 // lib/admin/admin_dashboard.dart
-// Enhanced Admin Dashboard with improved UX, floating actions, and smooth animations
+// Enhanced Admin Dashboard with FAB removed (bottom-right button eliminated)
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -27,10 +27,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   bool _isLoading = false;
   bool _isRefreshing = false;
-  bool _fabExpanded = false;
-
-  late AnimationController _fabAnimationController;
-  late Animation<double> _fabAnimation;
 
   static const _cardRadius = 16.0;
   static const _borderColor = Color(0xFFE6ECE6);
@@ -44,24 +40,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       if (!mounted) return;
       setState(() => searchQuery = _searchController.text);
     });
-    
-    _fabAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    );
-    
-    _fabAnimation = CurvedAnimation(
-      parent: _fabAnimationController,
-      curve: Curves.easeInOut,
-    );
-    
+
     _loadData();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _fabAnimationController.dispose();
     super.dispose();
   }
 
@@ -91,7 +76,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         for (var meeting in meetingsData) {
           final datetime = DateTime.tryParse(meeting['datetime'] ?? '');
           final time = datetime != null ? DateFormat('h:mm a').format(datetime) : '';
-          
+
           meetings.add({
             'id': meeting['id']?.toString() ?? '',
             'title': meeting['title'] ?? '',
@@ -136,7 +121,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         for (var meeting in meetingsData) {
           final datetime = DateTime.tryParse(meeting['datetime'] ?? '');
           final time = datetime != null ? DateFormat('h:mm a').format(datetime) : '';
-          
+
           meetings.add({
             'id': meeting['id']?.toString() ?? '',
             'title': meeting['title'] ?? '',
@@ -798,118 +783,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     );
   }
 
-  // Floating Action Button with expandable menu
-  Widget _buildFAB() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        if (_fabExpanded) ...[
-          _buildFABOption(
-            icon: Icons.refresh,
-            label: 'Refresh Data',
-            onTap: () {
-              setState(() => _fabExpanded = false);
-              _fabAnimationController.reverse();
-              _refreshData();
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildFABOption(
-            icon: Icons.add_task,
-            label: 'Add Task',
-            onTap: () {
-              setState(() => _fabExpanded = false);
-              _fabAnimationController.reverse();
-              _openPlanner();
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildFABOption(
-            icon: Icons.event,
-            label: 'New Meeting',
-            onTap: () {
-              setState(() => _fabExpanded = false);
-              _fabAnimationController.reverse();
-              _openMeetings();
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildFABOption(
-            icon: Icons.account_balance_wallet,
-            label: 'Budget',
-            onTap: () {
-              setState(() => _fabExpanded = false);
-              _fabAnimationController.reverse();
-              _openBudget();
-            },
-          ),
-          const SizedBox(height: 16),
-        ],
-        
-        // Main FAB
-        FloatingActionButton(
-          onPressed: () {
-            setState(() => _fabExpanded = !_fabExpanded);
-            if (_fabExpanded) {
-              _fabAnimationController.forward();
-            } else {
-              _fabAnimationController.reverse();
-            }
-          },
-          backgroundColor: _accentGreen,
-          elevation: 8,
-          child: AnimatedRotation(
-            turns: _fabExpanded ? 0.125 : 0.0,
-            duration: const Duration(milliseconds: 250),
-            child: Icon(_fabExpanded ? Icons.close : Icons.add, color: Colors.white),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFABOption({required IconData icon, required String label, required VoidCallback onTap}) {
-    return ScaleTransition(
-      scale: _fabAnimation,
-      child: FadeTransition(
-        opacity: _fabAnimation,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(28),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 4)),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 20, color: _accentGreen),
-                  const SizedBox(width: 12),
-                  Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
       drawer: _buildDrawer(),
       backgroundColor: const Color(0xFFF7FBF7),
-      floatingActionButton: _buildFAB(),
+      // floatingActionButton removed intentionally to eliminate bottom-right button
       body: RefreshIndicator(
         onRefresh: _refreshData,
         color: _accentGreen,

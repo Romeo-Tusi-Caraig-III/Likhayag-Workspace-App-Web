@@ -1,299 +1,146 @@
-// lib/admin/planner_dashboard.dart
-// Enhanced Planner with improved UI/UX and smart FABs (updated: separate FAB toggle, add FAB, animations, confirmations)
-
-import 'dart:convert';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import 'package:intl/intl.dart';
-import '../services/api_service.dart';
+import '/services/api_service.dart';
 
-class Task {
-  Task({
+class Event {
+  final String id;
+  final String title;
+  final DateTime start;
+  final String type;
+  final String status;
+  final String location;
+  final String description;
+  final String source;
+  final Map<String, dynamic>? rawData;
+
+  Event({
     required this.id,
     required this.title,
-    this.desc = '',
-    this.type = 'assignment',
-    this.priority = 'medium',
-    required this.dueDateIso,
-    this.progress = 0,
-    this.completed = false,
-    required this.createdAtIso,
+    required this.start,
+    required this.type,
+    required this.status,
+    this.location = '',
+    this.description = '',
+    this.source = 'task',
+    this.rawData,
   });
 
-  String id;
-  String title;
-  String desc;
-  String type;
-  String priority;
-  String dueDateIso;
-  int progress;
-  bool completed;
-  String createdAtIso;
+  factory Event.fromTask(Map<String, dynamic> task) {
+    DateTime startDate;
+    try {
+      startDate = DateTime.parse(task['due'] ?? DateTime.now().toIso8601String());
+    } catch (e) {
+      startDate = DateTime.now();
+    }
 
-  factory Task.fromApi(Map<String, dynamic> m) {
-    return Task(
-      id: m['id'].toString(),
-      title: (m['title'] ?? '').toString(),
-      desc: (m['notes'] ?? '').toString(),
-      type: (m['type'] ?? 'assignment').toString(),
-      priority: (m['priority'] ?? 'medium').toString(),
-      dueDateIso: (m['due'] ?? '').toString(),
-      progress: int.tryParse(m['progress']?.toString() ?? '0') ?? 0,
-      completed: m['completed'] == true,
-      createdAtIso: (m['created_at'] ?? DateTime.now().toIso8601String()).toString(),
+    return Event(
+      id: 'task_${task['id']}',
+      title: task['title'] ?? 'Untitled Task',
+      start: startDate,
+      type: task['type'] ?? 'assignment',
+      status: task['completed'] == true ? 'Completed' : 'Pending',
+      location: '',
+      description: task['notes'] ?? task['desc'] ?? '',
+      source: 'task',
+      rawData: task,
     );
   }
 
-  Map<String, dynamic> toApi() {
-    return {
-      'title': title,
-      'notes': desc,
-      'type': type,
-      'priority': priority,
-      'due': dueDateIso,
-      'progress': progress,
-      'completed': completed,
-    };
+  factory Event.fromMeeting(Map<String, dynamic> meeting) {
+    DateTime startDate;
+    try {
+      startDate = DateTime.parse(meeting['datetime']);
+    } catch (e) {
+      startDate = DateTime.now();
+    }
+
+    return Event(
+      id: 'meeting_${meeting['id']}',
+      title: meeting['title'] ?? 'Untitled Meeting',
+      start: startDate,
+      type: meeting['type'] ?? 'meeting',
+      status: meeting['status'] ?? 'Not Started',
+      location: meeting['location'] ?? '',
+      description: meeting['purpose'] ?? '',
+      source: 'meeting',
+      rawData: meeting,
+    );
   }
+
+  String get taskId => id.replaceFirst('task_', '');
+  String get meetingId => id.replaceFirst('meeting_', '');
 }
 
-class PlannerPage extends StatefulWidget {
-  const PlannerPage({super.key});
+class CalendarPage extends StatefulWidget {
+  const CalendarPage({super.key});
 
   @override
-  State<PlannerPage> createState() => _PlannerHomePage();
+  State<CalendarPage> createState() => _CalendarPageState();
 }
 
-enum SortBy { due, priority, created }
-
-class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderStateMixin {
-  final List<Task> tasks = [];
-  String currentTab = 'all';
-  String search = '';
-  SortBy sortBy = SortBy.due;
-  late final DateFormat dateFormatter;
+class _CalendarPageState extends State<CalendarPage> with SingleTickerProviderStateMixin {
+  DateTime _displayMonth = DateTime.now();
+  DateTime? _selectedDate;
+  final Map<String, List<Event>> _events = {};
+  final DateFormat _labelFormat = DateFormat('EEE, MMM d, yyyy');
 
   bool _isLoading = false;
   bool _isRefreshing = false;
   bool _fabExpanded = false;
   late AnimationController _fabController;
 
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _titleCtl = TextEditingController();
-  final TextEditingController _descCtl = TextEditingController();
-  final TextEditingController _dueDateCtl = TextEditingController();
-  String _type = 'assignment';
-  String _priority = 'medium';
-  bool _completed = false;
-  String? _editingId;
-  DateTime? _pickedDate;
+  bool _showTasks = true;
+  bool _showMeetings = true;
+  bool _showCompleted = true;
+  bool _showPending = true;
 
-  static const Color segEmerald = Color(0xFF059669);
-  final int _maxVisibleTasks = 6;
-  bool _showMoreTasks = false;
+  static const Color primary = Color(0xFF10B981);
+  static const Color primaryDark = Color(0xFF059669);
 
   @override
   void initState() {
     super.initState();
-    dateFormatter = DateFormat.yMMMEd();
-    _loadTasksFromApi();
-
+    _loadEvents();
     _fabController = AnimationController(
-      duration: const Duration(milliseconds: 260),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
     );
   }
 
   @override
   void dispose() {
-    _titleCtl.dispose();
-    _descCtl.dispose();
-    _dueDateCtl.dispose();
     _fabController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadTasksFromApi() async {
-    if (_isLoading) return;
-    setState(() => _isLoading = true);
+  String _dateKey(DateTime d) =>
+      "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
 
-    try {
-      final data = await ApiService.getTasks();
-      if (!mounted) return;
-
-      setState(() {
-        tasks.clear();
-        for (var item in data) {
-          tasks.add(Task.fromApi(item));
-        }
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      _showSnack('Failed to load tasks: $e');
-    }
+  String _monthLabel(DateTime d) {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
+    return '${months[d.month - 1]} ${d.year}';
   }
 
-  Future<void> _refreshTasks() async {
-    if (_isRefreshing) return;
-    setState(() => _isRefreshing = true);
+  String _dateLabel(DateTime d) => _labelFormat.format(d);
 
-    try {
-      final data = await ApiService.getTasks();
-      if (!mounted) return;
-
-      setState(() {
-        tasks.clear();
-        for (var item in data) {
-          tasks.add(Task.fromApi(item));
-        }
-        _isRefreshing = false;
-      });
-      _showSnack('Data refreshed');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isRefreshing = false);
-    }
+  String _timeLabel(DateTime d) {
+    final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final minute = d.minute.toString().padLeft(2, '0');
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $ampm';
   }
 
-  Future<void> _createTaskApi(Task task) async {
-    try {
-      final result = await ApiService.createTask(task.toApi());
-
-      if (result['success'] == true) {
-        await _loadTasksFromApi();
-        _showSnack('Task created successfully');
-      } else {
-        _showSnack('Failed: ${result['message']}');
-      }
-    } catch (e) {
-      _showSnack('Error: $e');
-    }
-  }
-
-  Future<void> _updateTaskApi(String taskId, Map<String, dynamic> updates) async {
-    try {
-      final result = await ApiService.updateTask(taskId, updates);
-
-      if (result['success'] == true) {
-        await _loadTasksFromApi();
-      } else {
-        _showSnack('Failed: ${result['message']}');
-      }
-    } catch (e) {
-      _showSnack('Error: $e');
-    }
-  }
-
-  Future<void> _deleteTaskApi(String taskId) async {
-    try {
-      final result = await ApiService.deleteTask(taskId);
-
-      if (result['success'] == true) {
-        await _loadTasksFromApi();
-        _showSnack('Task deleted');
-      } else {
-        _showSnack('Failed: ${result['message']}');
-      }
-    } catch (e) {
-      _showSnack('Error: $e');
-    }
-  }
-
-  Future<void> _bulkComplete() async {
-    final pending = tasks.where((t) => !t.completed).toList();
-
-    if (pending.isEmpty) {
-      _showSnack('No pending tasks');
-      return;
-    }
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Complete All'),
-        content: Text('Mark ${pending.length} pending task(s) as complete?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: segEmerald),
-            child: const Text('Complete All'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    int completed = 0;
-    for (var task in pending) {
-      try {
-        await ApiService.updateTask(task.id, {'completed': true});
-        completed++;
-      } catch (e) {
-        // Continue with others
-      }
-    }
-
-    await _loadTasksFromApi();
-    _showSnack('Completed $completed task(s)');
-  }
-
-  Future<void> _exportTasks() async {
-    _showSnack('Exporting tasks... (Feature coming soon)');
-    // TODO: Implement export to CSV/PDF
-  }
-
-  Future<void> _archiveCompleted() async {
-    final completed = tasks.where((t) => t.completed).toList();
-
-    if (completed.isEmpty) {
-      _showSnack('No completed tasks to archive');
-      return;
-    }
-
-    // _archiveCompleted already asks confirmation inside
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Archive Completed'),
-        content: Text('Archive ${completed.length} completed task(s)?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            child: const Text('Archive'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    int archived = 0;
-    for (var task in completed) {
-      try {
-        // Call archive API if available, or delete
-        await ApiService.deleteTask(task.id);
-        archived++;
-      } catch (e) {
-        // Continue with others
-      }
-    }
-
-    await _loadTasksFromApi();
-    _showSnack('Archived $archived task(s)');
+  List<Event> _getFilteredEvents(List<Event> events) {
+    return events.where((event) {
+      if (event.source == 'task' && !_showTasks) return false;
+      if (event.source == 'meeting' && !_showMeetings) return false;
+      final isCompleted = event.status.toLowerCase().contains('complete');
+      if (isCompleted && !_showCompleted) return false;
+      if (!isCompleted && !_showPending) return false;
+      return true;
+    }).toList();
   }
 
   void _toggleFAB() {
@@ -319,465 +166,322 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
     );
   }
 
-  int daysDiff(String? iso) {
-    if (iso == null || iso.isEmpty) return 9999;
-    DateTime? d = DateTime.tryParse(iso);
-    if (d == null) return 9999;
-    final today = DateTime.now();
-    final td = DateTime(today.year, today.month, today.day);
-    final target = DateTime(d.year, d.month, d.day);
-    return target.difference(td).inDays;
-  }
-
-  String fmtDate(String iso) {
-    final d = DateTime.tryParse(iso);
-    if (d == null) return 'TBD';
-    return dateFormatter.format(d);
-  }
-
-  List<Task> getFilteredSorted() {
-    final q = search.trim().toLowerCase();
-    var list = tasks.where((t) {
-      final matchesSearch = q.isEmpty || t.title.toLowerCase().contains(q) || t.desc.toLowerCase().contains(q);
-      if (!matchesSearch) return false;
-      if (currentTab == 'pending') return !t.completed;
-      if (currentTab == 'completed') return t.completed;
-      if (currentTab == 'high') return t.priority == 'high';
-      return true;
-    }).toList();
-
-    if (sortBy == SortBy.due) {
-      list.sort((a, b) {
-        final da = DateTime.tryParse(a.dueDateIso);
-        final db = DateTime.tryParse(b.dueDateIso);
-        if (da == null && db == null) return 0;
-        if (da == null) return 1;
-        if (db == null) return -1;
-        return da.compareTo(db);
-      });
-    } else if (sortBy == SortBy.priority) {
-      final order = {'high': 0, 'medium': 1, 'low': 2};
-      list.sort((a, b) => (order[a.priority] ?? 3) - (order[b.priority] ?? 3));
-    } else {
-      list.sort((a, b) {
-        final pa = DateTime.tryParse(a.createdAtIso);
-        final pb = DateTime.tryParse(b.createdAtIso);
-        if (pa == null && pb == null) return 0;
-        if (pa == null) return 1;
-        if (pb == null) return -1;
-        return pb.compareTo(pa);
-      });
+  String _generateCSV(List<Event> events) {
+    final buffer = StringBuffer();
+    buffer.writeln('Title,Type,Date,Time,Status,Location,Description,Source');
+    for (var event in events) {
+      buffer.writeln('"${event.title}","${event.type}","${_dateLabel(event.start)}","${_timeLabel(event.start)}","${event.status}","${event.location}","${event.description}","${event.source}"');
     }
-    return list;
+    return buffer.toString();
   }
 
-  Map<String, int> computeStats() {
-    final pending = tasks.where((t) => !t.completed).length;
-    final completed = tasks.where((t) => t.completed).length;
-    final high = tasks.where((t) => t.priority == 'high').length;
-    final overdue = tasks.where((t) => daysDiff(t.dueDateIso) < 0 && !t.completed).length;
-    return {'pending': pending, 'completed': completed, 'high': high, 'overdue': overdue};
+  String _generateICalendar(List<Event> events) {
+    final buffer = StringBuffer();
+    buffer.writeln('BEGIN:VCALENDAR');
+    buffer.writeln('VERSION:2.0');
+    buffer.writeln('PRODID:-//StudyBuddy//Calendar Export//EN');
+    for (var event in events) {
+      buffer.writeln('BEGIN:VEVENT');
+      buffer.writeln('UID:${event.id}@studybuddy.app');
+      buffer.writeln('DTSTAMP:${_formatICalDateTime(DateTime.now())}');
+      buffer.writeln('DTSTART:${_formatICalDateTime(event.start)}');
+      buffer.writeln('SUMMARY:${event.title}');
+      buffer.writeln('DESCRIPTION:${event.description}');
+      if (event.location.isNotEmpty) buffer.writeln('LOCATION:${event.location}');
+      buffer.writeln('STATUS:${event.status.toUpperCase()}');
+      buffer.writeln('END:VEVENT');
+    }
+    buffer.writeln('END:VCALENDAR');
+    return buffer.toString();
   }
 
-  Future<void> _openAddDialog({Task? edit}) async {
-    _editingId = edit?.id;
-    if (edit != null) {
-      _titleCtl.text = edit.title;
-      _descCtl.text = edit.desc;
-      _type = edit.type;
-      _priority = edit.priority;
-      _completed = edit.completed;
-      _pickedDate = DateTime.tryParse(edit.dueDateIso);
-      _dueDateCtl.text = _pickedDate == null ? '' : DateFormat('yyyy-MM-dd').format(_pickedDate!);
+  String _formatICalDateTime(DateTime dt) {
+    return dt.toUtc().toIso8601String().replaceAll(RegExp(r'[-:]'), '').split('.')[0] + 'Z';
+  }
+
+  // ------------------ Part 2 & 3 methods ------------------
+
+  Future<void> _loadEvents() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final tasksData = await ApiService.getTasks();
+      final meetingsData = await ApiService.getMeetings();
+
+      if (!mounted) return;
+
+      final Map<String, List<Event>> newEvents = {};
+
+      for (var task in tasksData) {
+        if (task['due'] != null && task['due'].toString().isNotEmpty) {
+          try {
+            final event = Event.fromTask(task);
+            final key = _dateKey(event.start);
+            newEvents.putIfAbsent(key, () => []);
+            newEvents[key]!.add(event);
+          } catch (e) {
+            debugPrint('Error parsing task: $e');
+          }
+        }
+      }
+
+      for (var meeting in meetingsData) {
+        try {
+          final event = Event.fromMeeting(meeting);
+          final key = _dateKey(event.start);
+          newEvents.putIfAbsent(key, () => []);
+          newEvents[key]!.add(event);
+        } catch (e) {
+          debugPrint('Error parsing meeting: $e');
+        }
+      }
+
+      setState(() {
+        _events.clear();
+        _events.addAll(newEvents);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showSnack('Failed to load events: $e');
+    }
+  }
+
+  Future<void> _refreshEvents() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      final tasksData = await ApiService.getTasks();
+      final meetingsData = await ApiService.getMeetings();
+
+      if (!mounted) return;
+
+      final Map<String, List<Event>> newEvents = {};
+
+      for (var task in tasksData) {
+        if (task['due'] != null && task['due'].toString().isNotEmpty) {
+          try {
+            final event = Event.fromTask(task);
+            final key = _dateKey(event.start);
+            newEvents.putIfAbsent(key, () => []);
+            newEvents[key]!.add(event);
+          } catch (e) {
+            // Skip
+          }
+        }
+      }
+
+      for (var meeting in meetingsData) {
+        try {
+          final event = Event.fromMeeting(meeting);
+          final key = _dateKey(event.start);
+          newEvents.putIfAbsent(key, () => []);
+          newEvents[key]!.add(event);
+        } catch (e) {
+          // Skip
+        }
+      }
+
+      setState(() {
+        _events.clear();
+        _events.addAll(newEvents);
+        _isRefreshing = false;
+      });
+
+      _showSnack('Calendar refreshed');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isRefreshing = false);
+      _showSnack('Failed to refresh: $e');
+    }
+  }
+
+  Future<void> _goToToday() async {
+    _toggleFAB();
+    setState(() {
+      _displayMonth = DateTime.now();
+      _selectedDate = DateTime.now();
+    });
+
+    final todayKey = _dateKey(DateTime.now());
+    final allEvents = _events[todayKey] ?? [];
+    final filteredEvents = _getFilteredEvents(allEvents);
+
+    if (filteredEvents.isNotEmpty) {
+      _openDayEvents(DateTime.now());
     } else {
-      _editingId = null;
-      _titleCtl.clear();
-      _descCtl.clear();
-      _type = 'assignment';
-      _priority = 'medium';
-      _completed = false;
-      _pickedDate = null;
-      _dueDateCtl.clear();
+      _showSnack('No events today');
+    }
+  }
+
+  Future<void> _exportCalendar() async {
+    _toggleFAB();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Export Calendar', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            const Text('Choose export format:', style: TextStyle(fontSize: 14, color: Colors.black54)),
+            const SizedBox(height: 16),
+            _ExportOption(
+              icon: Icons.table_chart,
+              title: 'CSV Format',
+              subtitle: 'Compatible with Excel and Google Sheets',
+              onTap: () {
+                Navigator.pop(context);
+                _performExport('csv');
+              },
+            ),
+            const SizedBox(height: 12),
+            _ExportOption(
+              icon: Icons.picture_as_pdf,
+              title: 'PDF Format',
+              subtitle: 'Printable document',
+              onTap: () {
+                Navigator.pop(context);
+                _performExport('pdf');
+              },
+            ),
+            const SizedBox(height: 12),
+            _ExportOption(
+              icon: Icons.calendar_today,
+              title: 'iCal Format',
+              subtitle: 'Import to other calendar apps',
+              onTap: () {
+                Navigator.pop(context);
+                _performExport('ical');
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _performExport(String format) async {
+    _showSnack('Preparing $format export...');
+
+    final allEvents = <Event>[];
+    for (var eventList in _events.values) {
+      allEvents.addAll(eventList);
     }
 
-    // close FAB menu if open
-    if (_fabExpanded) _toggleFAB();
+    if (allEvents.isEmpty) {
+      _showSnack('No events to export');
+      return;
+    }
+
+    allEvents.sort((a, b) => a.start.compareTo(b.start));
+
+    switch (format) {
+      case 'csv':
+        _generateCSV(allEvents);
+        break;
+      case 'pdf':
+        _showSnack('PDF export coming soon');
+        return;
+      case 'ical':
+        _generateICalendar(allEvents);
+        break;
+    }
+
+    _showSnack('Exported ${allEvents.length} events as $format');
+  }
+
+  Future<void> _showCalendarFilters() async {
+    _toggleFAB();
 
     await showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return AnimatedPadding(
-          duration: const Duration(milliseconds: 150),
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: SingleChildScrollView(
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(_editingId == null ? 'Add Task' : 'Edit Task',
-                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                            ),
-                            InkWell(
-                              onTap: () => Navigator.pop(ctx),
-                              child: Container(
-                                width: 36,
-                                height: 36,
-                                decoration: const BoxDecoration(color: segEmerald, shape: BoxShape.circle),
-                                child: const Icon(Icons.close, color: Colors.white, size: 18),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _titleCtl,
-                          decoration: InputDecoration(
-                            labelText: 'Title',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                          ),
-                          validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: DropdownButtonFormField<String>(
-                                value: _type,
-                                decoration: InputDecoration(
-                                  labelText: 'Type',
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                  filled: true,
-                                  fillColor: Colors.grey.shade50,
-                                ),
-                                items: const [
-                                  DropdownMenuItem(value: 'assignment', child: Text('Assignment')),
-                                  DropdownMenuItem(value: 'study', child: Text('Study')),
-                                  DropdownMenuItem(value: 'project', child: Text('Project')),
-                                  DropdownMenuItem(value: 'exam', child: Text('Exam')),
-                                ],
-                                onChanged: (v) => setState(() => _type = v ?? 'assignment'),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () async {
-                                  final picked = await showDatePicker(
-                                    context: context,
-                                    initialDate: _pickedDate ?? DateTime.now(),
-                                    firstDate: DateTime(2020),
-                                    lastDate: DateTime(2030),
-                                  );
-                                  if (picked != null) {
-                                    _pickedDate = picked;
-                                    _dueDateCtl.text = DateFormat('yyyy-MM-dd').format(picked);
-                                    setState(() {});
-                                  }
-                                },
-                                style: OutlinedButton.styleFrom(
-                                  backgroundColor: segEmerald,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                ),
-                                icon: const Icon(Icons.calendar_today, size: 16),
-                                label: Text(_dueDateCtl.text.isEmpty ? 'Due Date' : _dueDateCtl.text,
-                                    style: const TextStyle(fontSize: 12)),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                          value: _priority,
-                          decoration: InputDecoration(
-                            labelText: 'Priority',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'low', child: Text('Low')),
-                            DropdownMenuItem(value: 'medium', child: Text('Medium')),
-                            DropdownMenuItem(value: 'high', child: Text('High')),
-                          ],
-                          onChanged: (v) => setState(() => _priority = v ?? 'medium'),
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _descCtl,
-                          decoration: InputDecoration(
-                            labelText: 'Description',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                          ),
-                          maxLines: 3,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Checkbox(value: _completed, onChanged: (v) => setState(() => _completed = v ?? false)),
-                            const Text('Mark completed'),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: const Text('Cancel'),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () async {
-                                  if (!_formKey.currentState!.validate()) return;
-                                  if (_pickedDate == null) {
-                                    _showSnack('Select a due date');
-                                    return;
-                                  }
-
-                                  final task = Task(
-                                    id: _editingId ?? '',
-                                    title: _titleCtl.text.trim(),
-                                    desc: _descCtl.text.trim(),
-                                    type: _type,
-                                    priority: _priority,
-                                    dueDateIso: _pickedDate!.toIso8601String(),
-                                    progress: 0,
-                                    completed: _completed,
-                                    createdAtIso: DateTime.now().toIso8601String(),
-                                  );
-
-                                  Navigator.pop(ctx);
-
-                                  if (_editingId != null) {
-                                    await _updateTaskApi(_editingId!, task.toApi());
-                                  } else {
-                                    await _createTaskApi(task);
-                                  }
-                                },
-                                style: ElevatedButton.styleFrom(backgroundColor: segEmerald, foregroundColor: Colors.white),
-                                child: Text(_editingId == null ? 'Add' : 'Save'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _confirmDelete(Task t) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete task?'),
-        content: const Text('Are you sure?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) await _deleteTaskApi(t.id);
-  }
-
-  Widget _taskSegmentedControl(List<String> tabs) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: tabs.map((tab) {
-          final bool active = currentTab == tab;
-          final String label = tab[0].toUpperCase() + tab.substring(1);
-
-          return Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => currentTab = tab),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: active
-                    ? BoxDecoration(
-                        color: segEmerald,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      )
-                    : const BoxDecoration(color: Colors.transparent),
-                child: Center(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: active ? Colors.white : Colors.black87,
-                    ),
-                    maxLines: 1,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _chip(String text, Color bg, {Color? textColor}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor ?? Colors.black87),
-      ),
-    );
-  }
-
-  Color _priorityColor(String p) {
-    if (p == 'high') return Colors.red.shade100;
-    if (p == 'low') return Colors.green.shade100;
-    return Colors.orange.shade100;
-  }
-
-  Widget _taskCard(Task t) {
-    final diff = daysDiff(t.dueDateIso);
-    final overdue = diff < 0;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF6EEF8),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
+      isScrollControlled: true,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(t.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  const SizedBox(height: 8),
-                  if (t.desc.isNotEmpty)
-                    Text(t.desc, style: TextStyle(fontSize: 13, color: Colors.grey.shade700), maxLines: 2),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _chip(t.type, Colors.white, textColor: Colors.black87),
-                      _chip(t.priority, _priorityColor(t.priority)),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: overdue ? Colors.red.shade50 : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          overdue ? '${diff.abs()}d overdue' : '$diff d left',
-                          style: TextStyle(
-                            color: overdue ? Colors.red.shade700 : Colors.grey.shade800,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              mainAxisSize: MainAxisSize.min,
+            Row(
               children: [
-                InkWell(
-                  onTap: () => _openAddDialog(edit: t),
-                  borderRadius: BorderRadius.circular(8),
-                  child: const Padding(
-                    padding: EdgeInsets.all(6.0),
-                    child: Icon(Icons.edit, color: segEmerald, size: 20),
+                const Expanded(
+                  child: Text('Calendar Filters', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                ),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(colors: [primary, primaryDark]),
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                    onPressed: () => Navigator.pop(context),
                   ),
                 ),
-                const SizedBox(height: 6),
-                InkWell(
-                  onTap: () => _confirmDelete(t),
-                  borderRadius: BorderRadius.circular(8),
-                  child: const Padding(
-                    padding: EdgeInsets.all(6.0),
-                    child: Icon(Icons.delete, color: Colors.red, size: 20),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _FilterOption(
+              icon: Icons.task_alt,
+              label: 'Show Tasks',
+              value: _showTasks,
+              onChanged: (val) => setState(() => _showTasks = val),
+            ),
+            _FilterOption(
+              icon: Icons.event,
+              label: 'Show Meetings',
+              value: _showMeetings,
+              onChanged: (val) => setState(() => _showMeetings = val),
+            ),
+            _FilterOption(
+              icon: Icons.check_circle,
+              label: 'Show Completed',
+              value: _showCompleted,
+              onChanged: (val) => setState(() => _showCompleted = val),
+            ),
+            _FilterOption(
+              icon: Icons.pending,
+              label: 'Show Pending',
+              value: _showPending,
+              onChanged: (val) => setState(() => _showPending = val),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: const Text('Cancel'),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Transform.scale(
-                  scale: 1.1,
-                  child: Checkbox(
-                    value: t.completed,
-                    onChanged: (v) => _updateTaskApi(t.id, {'completed': v ?? false}),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                    activeColor: segEmerald,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _GradientButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      setState(() {});
+                      _showSnack('Filters applied');
+                    },
+                    child: const Text('Apply'),
                   ),
                 ),
               ],
@@ -788,314 +492,1395 @@ class _PlannerHomePage extends State<PlannerPage> with SingleTickerProviderState
     );
   }
 
-  Widget _statTileColored(String label, int value, Color bg) {
-    return Container(
-      height: 86,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.white70)),
-          const SizedBox(height: 6),
-          Text('$value', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white)),
-        ],
+  Future<void> _quickAddTask() async {
+    _toggleFAB();
+
+    final titleController = TextEditingController();
+    final descController = TextEditingController();
+    DateTime selectedDate = _selectedDate ?? DateTime.now();
+    String selectedType = 'assignment';
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.add_task, color: primary, size: 24),
+                    ),
+                    const SizedBox(width: 16),
+                    const Expanded(
+                      child: Text('Quick Add Task', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: titleController,
+                  decoration: InputDecoration(
+                    labelText: 'Task Title',
+                    prefixIcon: const Icon(Icons.title),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedType,
+                  decoration: InputDecoration(
+                    labelText: 'Task Type',
+                    prefixIcon: const Icon(Icons.category),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'assignment', child: Text('Assignment')),
+                    DropdownMenuItem(value: 'quiz', child: Text('Quiz')),
+                    DropdownMenuItem(value: 'exam', child: Text('Exam')),
+                    DropdownMenuItem(value: 'project', child: Text('Project')),
+                    DropdownMenuItem(value: 'other', child: Text('Other')),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) setModalState(() => selectedType = val);
+                  },
+                ),
+                const SizedBox(height: 16),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) setModalState(() => selectedDate = picked);
+                  },
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: 'Due Date',
+                      prefixIcon: const Icon(Icons.calendar_today),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(_dateLabel(selectedDate)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: descController,
+                  decoration: InputDecoration(
+                    labelText: 'Notes (Optional)',
+                    prefixIcon: const Icon(Icons.notes),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  maxLines: 3,
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _GradientButton(
+                        onPressed: () async {
+                          if (titleController.text.trim().isEmpty) {
+                            _showSnack('Please enter a task title');
+                            return;
+                          }
+
+                          Navigator.pop(context);
+
+                          final result = await ApiService.createTask({
+                            'title': titleController.text.trim(),
+                            'type': selectedType,
+                            'due': selectedDate.toIso8601String(),
+                            'notes': descController.text.trim(),
+                            'completed': false,
+                          });
+
+                          if (result['success'] == true) {
+                            await _refreshEvents();
+                            _showSnack('Task created successfully');
+                          } else {
+                            _showSnack(result['message'] ?? 'Failed to create task');
+                          }
+                        },
+                        child: const Text('Create Task'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Future<void> _confirmShowMore(int remaining) async {
-    final ok = await showDialog<bool>(
+  Future<void> _quickAddMeeting() async {
+    _toggleFAB();
+
+    final titleController = TextEditingController();
+    final purposeController = TextEditingController();
+    final locationController = TextEditingController();
+    final linkController = TextEditingController();
+    DateTime selectedDate = _selectedDate ?? DateTime.now();
+    TimeOfDay selectedTime = TimeOfDay.now();
+    String selectedType = 'team';
+
+    await showModalBottomSheet(
       context: context,
-      builder: (_) => AlertDialog(
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.video_call, color: primary, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      const Expanded(
+                        child: Text('Quick Add Meeting', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: titleController,
+                    decoration: InputDecoration(
+                      labelText: 'Meeting Title',
+                      prefixIcon: const Icon(Icons.title),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: selectedType,
+                    decoration: InputDecoration(
+                      labelText: 'Meeting Type',
+                      prefixIcon: const Icon(Icons.category),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'team', child: Text('Team Meeting')),
+                      DropdownMenuItem(value: 'client', child: Text('Client Meeting')),
+                      DropdownMenuItem(value: 'planning', child: Text('Planning')),
+                      DropdownMenuItem(value: 'review', child: Text('Review')),
+                      DropdownMenuItem(value: 'other', child: Text('Other')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setModalState(() => selectedType = val);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (picked != null) setModalState(() => selectedDate = picked);
+                          },
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: 'Date',
+                              prefixIcon: const Icon(Icons.calendar_today),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: Text(DateFormat('MMM d, yyyy').format(selectedDate)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final picked = await showTimePicker(context: context, initialTime: selectedTime);
+                            if (picked != null) setModalState(() => selectedTime = picked);
+                          },
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: 'Time',
+                              prefixIcon: const Icon(Icons.access_time),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: Text(selectedTime.format(context)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: locationController,
+                    decoration: InputDecoration(
+                      labelText: 'Location (Optional)',
+                      prefixIcon: const Icon(Icons.location_on),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: linkController,
+                    decoration: InputDecoration(
+                      labelText: 'Meeting Link (Optional)',
+                      prefixIcon: const Icon(Icons.link),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    keyboardType: TextInputType.url,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: purposeController,
+                    decoration: InputDecoration(
+                      labelText: 'Purpose (Optional)',
+                      prefixIcon: const Icon(Icons.notes),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    maxLines: 3,
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _GradientButton(
+                          onPressed: () async {
+                            if (titleController.text.trim().isEmpty) {
+                              _showSnack('Please enter a meeting title');
+                              return;
+                            }
+
+                            Navigator.pop(context);
+
+                            final meetingDateTime = DateTime(
+                              selectedDate.year,
+                              selectedDate.month,
+                              selectedDate.day,
+                              selectedTime.hour,
+                              selectedTime.minute,
+                            );
+
+                            final result = await ApiService.createMeeting({
+                              'title': titleController.text.trim(),
+                              'type': selectedType,
+                              'datetime': meetingDateTime.toIso8601String(),
+                              'location': locationController.text.trim(),
+                              'meetLink': linkController.text.trim(),
+                              'purpose': purposeController.text.trim(),
+                              'attendees': [],
+                            });
+
+                            if (result['success'] == true) {
+                              await _refreshEvents();
+                              _showSnack('Meeting created successfully');
+                            } else {
+                              _showSnack(result['message'] ?? 'Failed to create meeting');
+                            }
+                          },
+                          child: const Text('Create Meeting'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteEvent(Event event) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Show more tasks?'),
-        content: Text('There are $remaining more task(s). Show them?'),
+        title: const Text('Delete Event'),
+        content: Text('Are you sure you want to delete "${event.title}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: segEmerald),
-            child: const Text('Show'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
 
-    if (ok == true) {
-      setState(() => _showMoreTasks = true);
+    if (confirm != true) return;
+
+    try {
+      Map<String, dynamic> result;
+      if (event.source == 'task') {
+        result = await ApiService.deleteTask(event.taskId);
+      } else {
+        result = await ApiService.deleteMeeting(event.meetingId);
+      }
+
+      if (result['success'] == true) {
+        await _refreshEvents();
+        if (mounted) {
+          _showSnack('${event.source == 'task' ? 'Task' : 'Meeting'} deleted');
+        }
+      } else {
+        if (mounted) {
+          _showSnack(result['message'] ?? 'Failed to delete');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('Error deleting: $e');
+      }
     }
+  }
+
+  void _showEventDetails(Event event) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    event.source == 'task' ? Icons.task : Icons.event,
+                    color: primary,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        event.title,
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        event.source.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _DetailRow(
+              icon: Icons.access_time,
+              label: 'Time',
+              value: _timeLabel(event.start),
+            ),
+            const SizedBox(height: 16),
+            _DetailRow(
+              icon: Icons.category,
+              label: 'Type',
+              value: event.type,
+            ),
+            const SizedBox(height: 16),
+            _DetailRow(
+              icon: Icons.flag,
+              label: 'Status',
+              value: event.status,
+              valueColor: event.status.toLowerCase().contains('complete')
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+            if (event.location.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _DetailRow(
+                icon: Icons.location_on,
+                label: 'Location',
+                value: event.location,
+              ),
+            ],
+            if (event.description.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _DetailRow(
+                icon: Icons.notes,
+                label: 'Description',
+                value: event.description,
+              ),
+            ],
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _deleteEvent(event);
+                    },
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    label: const Text('Delete', style: TextStyle(color: Colors.red)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.red),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _GradientButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      if (event.source == 'task') {
+                        Navigator.pushNamed(context, '/planner').then((_) => _refreshEvents());
+                      } else {
+                        Navigator.pushNamed(context, '/meetings').then((_) => _refreshEvents());
+                      }
+                    },
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.edit, size: 18),
+                        SizedBox(width: 8),
+                        Text('Edit'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openDayEvents(DateTime date) {
+    final key = _dateKey(date);
+    final allEvents = _events[key] ?? [];
+    final events = _getFilteredEvents(allEvents);
+
+    if (events.isEmpty) {
+      _showSnack('No events on ${_dateLabel(date)}');
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.7,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [primary, primaryDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.event, color: Colors.white, size: 28),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _dateLabel(date),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${events.length} event${events.length > 1 ? 's' : ''}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.all(16),
+                itemCount: events.length,
+                itemBuilder: (context, i) => _EventCard(
+                  event: events[i],
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showEventDetails(events[i]);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSmartFAB() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        AnimatedOpacity(
+          opacity: _fabExpanded ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          child: _fabExpanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _SmallFAB(
+                    onPressed: _quickAddTask,
+                    icon: Icons.add_task,
+                    label: 'Add Task',
+                    heroTag: 'add_task',
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        AnimatedOpacity(
+          opacity: _fabExpanded ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          child: _fabExpanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _SmallFAB(
+                    onPressed: _quickAddMeeting,
+                    icon: Icons.video_call,
+                    label: 'Add Meeting',
+                    heroTag: 'add_meeting',
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        AnimatedOpacity(
+          opacity: _fabExpanded ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          child: _fabExpanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _SmallFAB(
+                    onPressed: _exportCalendar,
+                    icon: Icons.download,
+                    label: 'Export',
+                    heroTag: 'export',
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        AnimatedOpacity(
+          opacity: _fabExpanded ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          child: _fabExpanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _SmallFAB(
+                    onPressed: _goToToday,
+                    icon: Icons.today,
+                    label: 'Today',
+                    heroTag: 'today',
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        AnimatedOpacity(
+          opacity: _fabExpanded ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          child: _fabExpanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _SmallFAB(
+                    onPressed: _showCalendarFilters,
+                    icon: Icons.filter_list,
+                    label: 'Filters',
+                    heroTag: 'filters',
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        FloatingActionButton(
+          onPressed: _toggleFAB,
+          backgroundColor: primary,
+          heroTag: 'main',
+          child: AnimatedRotation(
+            turns: _fabExpanded ? 0.125 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: Icon(_fabExpanded ? Icons.close : Icons.add),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = getFilteredSorted();
-    final stats = computeStats();
-    final visible = _showMoreTasks ? filtered : filtered.take(_maxVisibleTasks).toList();
-
-    final tabs = ['all', 'pending', 'completed', 'high'];
-    final remaining = filtered.length > _maxVisibleTasks ? filtered.length - _maxVisibleTasks : 0;
-
-    // helpers for staggered slide animations
-    final addAnim = CurvedAnimation(parent: _fabController, curve: const Interval(0.0, 0.9, curve: Curves.easeOut));
-    final completeAnim = CurvedAnimation(parent: _fabController, curve: const Interval(0.05, 1.0, curve: Curves.easeOut));
-    final archiveAnim = CurvedAnimation(parent: _fabController, curve: const Interval(0.1, 1.0, curve: Curves.easeOut));
-    final exportAnim = CurvedAnimation(parent: _fabController, curve: const Interval(0.15, 1.0, curve: Curves.easeOut));
-
     return Scaffold(
-      backgroundColor: const Color(0xFFF7FBF7),
+      extendBody: true,
+      appBar: AppBar(
+        elevation: 0,
+        title: const Text('Calendar', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: Icon(_isRefreshing ? Icons.hourglass_empty : Icons.refresh),
+            onPressed: _isRefreshing ? null : _refreshEvents,
+            tooltip: 'Refresh',
+          ),
+        ],
+      ),
       body: Stack(
         children: [
-          SafeArea(
-            child: RefreshIndicator(
-              onRefresh: _refreshTasks,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+          RefreshIndicator(
+            onRefresh: _refreshEvents,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _headerRightChips(),
+                    const SizedBox(height: 12),
+                    _monthNavigator(),
+                    const SizedBox(height: 10),
+                    _weekLabels(),
                     const SizedBox(height: 8),
-
-                    // Stats at top
-                    Row(
-                      children: [
-                        Expanded(child: _statTileColored('Pending', stats['pending']!, Colors.blue.shade400)),
-                        const SizedBox(width: 10),
-                        Expanded(child: _statTileColored('Done', stats['completed']!, Colors.green.shade400)),
-                        const SizedBox(width: 10),
-                        Expanded(child: _statTileColored('High', stats['high']!, Colors.red.shade400)),
-                        const SizedBox(width: 10),
-                        Expanded(child: _statTileColored('Overdue', stats['overdue']!, Colors.orange.shade400)),
-                      ],
+                    Expanded(
+                      child: _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _monthGrid(),
                     ),
-
-                    const SizedBox(height: 18),
-
-                    Row(
-                      children: [
-                        const Text('Planner', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
-                        const Spacer(),
-                        IconButton(
-                          icon: _isLoading
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.refresh),
-                          onPressed: _isLoading ? null : _loadTasksFromApi,
-                        ),
-                        PopupMenuButton<String>(
-                          onSelected: (v) {
-                            setState(() {
-                              if (v == 'export') {
-                                _exportTasks();
-                              } else if (v == 'archive') {
-                                _archiveCompleted();
-                              } else if (v == 'sort_due') {
-                                sortBy = SortBy.due;
-                              } else if (v == 'sort_priority') {
-                                sortBy = SortBy.priority;
-                              } else if (v == 'sort_created') {
-                                sortBy = SortBy.created;
-                              }
-                            });
-                          },
-                          itemBuilder: (ctx) => [
-                            const PopupMenuItem(value: 'export', child: Text('Export')),
-                            const PopupMenuItem(value: 'archive', child: Text('Archive completed')),
-                            const PopupMenuDivider(),
-                            const PopupMenuItem(value: 'sort_due', child: Text('Sort: Due date')),
-                            const PopupMenuItem(value: 'sort_priority', child: Text('Sort: Priority')),
-                            const PopupMenuItem(value: 'sort_created', child: Text('Sort: Created')),
-                          ],
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    TextField(
-                      decoration: InputDecoration(
-                        hintText: 'Search tasks...',
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      onChanged: (v) => setState(() => search = v),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _taskSegmentedControl(tabs),
-
-                    const SizedBox(height: 12),
-
-                    if (filtered.isEmpty && !_isLoading)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 40),
-                        child: Center(
-                          child: Column(
-                            children: [
-                              const Icon(Icons.inbox, size: 48, color: Colors.grey),
-                              const SizedBox(height: 12),
-                              Text('No tasks found', style: TextStyle(color: Colors.grey.shade700)),
-                            ],
-                          ),
-                        ),
-                      )
-                    else ...[
-                      ListView.builder(
-                        itemCount: visible.length,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemBuilder: (context, index) {
-                          final t = visible[index];
-                          return _taskCard(t);
-                        },
-                      ),
-                      if (filtered.length > _maxVisibleTasks)
-                        TextButton(
-                          onPressed: () {
-                            // ask for confirmation before expanding list
-                            if (!_showMoreTasks) {
-                              _confirmShowMore(remaining);
-                            } else {
-                              setState(() => _showMoreTasks = false);
-                            }
-                          },
-                          child: Text(_showMoreTasks ? 'Show less' : 'Show more (${filtered.length - _maxVisibleTasks})'),
-                        ),
-                      const SizedBox(height: 90), // extra space for FAB
-                    ],
                   ],
                 ),
               ),
             ),
           ),
+          if (_fabExpanded)
+            GestureDetector(
+              onTap: _toggleFAB,
+              child: Container(
+                color: Colors.black.withOpacity(0.3),
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: _buildSmartFAB(),
+    );
+  }
 
-          // Floating action buttons (expandable) with staggered slide + scale animations
-          Positioned(
-            bottom: 18,
-            right: 18,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Export FAB
-                SlideTransition(
-                  position: Tween<Offset>(begin: const Offset(0, 0.9), end: Offset.zero).animate(exportAnim),
-                  child: FadeTransition(
-                    opacity: exportAnim,
-                    child: ScaleTransition(
-                      scale: exportAnim,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10.0),
-                        child: FloatingActionButton.extended(
-                          heroTag: 'exportFab',
-                          onPressed: () {
-                            _toggleFAB();
-                            _exportTasks();
-                          },
-                          label: const Text('Export'),
-                          icon: const Icon(Icons.file_upload),
-                          backgroundColor: Colors.purple,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+  Widget _headerRightChips() {
+    final today = DateTime.now();
+    final todayLabel = DateFormat('EEE, MMM d').format(today);
 
-                // Archive FAB
-                SlideTransition(
-                  position: Tween<Offset>(begin: const Offset(0, 0.9), end: Offset.zero).animate(archiveAnim),
-                  child: FadeTransition(
-                    opacity: archiveAnim,
-                    child: ScaleTransition(
-                      scale: archiveAnim,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10.0),
-                        child: FloatingActionButton.extended(
-                          heroTag: 'archiveFab',
-                          onPressed: () {
-                            _toggleFAB();
-                            _archiveCompleted();
-                          },
-                          label: const Text('Archive'),
-                          icon: const Icon(Icons.archive),
-                          backgroundColor: Colors.orange,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+    final now = DateTime.now();
+    final weekEnd = now.add(const Duration(days: 7));
+    final upcomingCount = _events.entries
+        .expand((e) => e.value)
+        .where((ev) =>
+            ev.start.isAfter(now.subtract(const Duration(seconds: 1))) &&
+            ev.start.isBefore(weekEnd.add(const Duration(seconds: 1))))
+        .length;
 
-                // Complete All FAB
-                SlideTransition(
-                  position: Tween<Offset>(begin: const Offset(0, 0.9), end: Offset.zero).animate(completeAnim),
-                  child: FadeTransition(
-                    opacity: completeAnim,
-                    child: ScaleTransition(
-                      scale: completeAnim,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10.0),
-                        child: FloatingActionButton.extended(
-                          heroTag: 'completeFab',
-                          onPressed: () {
-                            _toggleFAB();
-                            _bulkComplete();
-                          },
-                          label: const Text('Complete all'),
-                          icon: const Icon(Icons.done_all),
-                          backgroundColor: Colors.blueGrey,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Add FAB (child)
-                SlideTransition(
-                  position: Tween<Offset>(begin: const Offset(0, 0.9), end: Offset.zero).animate(addAnim),
-                  child: FadeTransition(
-                    opacity: addAnim,
-                    child: ScaleTransition(
-                      scale: addAnim,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10.0),
-                        child: FloatingActionButton(
-                          heroTag: 'addFab',
-                          onPressed: () {
-                            _toggleFAB();
-                            _openAddDialog();
-                          },
-                          backgroundColor: segEmerald,
-                          child: const Icon(Icons.add),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Main FAB (toggle) - rotates while animating
-                AnimatedBuilder(
-                  animation: _fabController,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: _fabController.value * (math.pi / 4),
-                      child: FloatingActionButton(
-                        heroTag: 'mainFab',
-                        backgroundColor: segEmerald,
-                        onPressed: _toggleFAB,
-                        child: Icon(_fabExpanded ? Icons.close : Icons.menu, color: Colors.white),
-                      ),
-                    );
-                  },
-                ),
-              ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'Calendar Overview',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
             ),
           ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: primary.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: primary.withOpacity(0.12)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today, size: 14, color: primaryDark),
+                    const SizedBox(width: 8),
+                    Text(
+                      todayLabel,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: primary.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.event_available, size: 14, color: primaryDark),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$upcomingCount upcoming',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _monthNavigator() {
+    return Row(
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left),
+          color: primaryDark,
+          onPressed: () {
+            setState(() {
+              _displayMonth = DateTime(
+                _displayMonth.year,
+                _displayMonth.month - 1,
+                1,
+              );
+            });
+          },
+        ),
+        Expanded(
+          child: Center(
+            child: Text(
+              _monthLabel(_displayMonth),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+            ),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right),
+          color: primaryDark,
+          onPressed: () {
+            setState(() {
+              _displayMonth = DateTime(
+                _displayMonth.year,
+                _displayMonth.month + 1,
+                1,
+              );
+            });
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _weekLabels() {
+    final labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return Row(
+      children: labels
+          .map((d) => Expanded(
+                child: Center(
+                  child: Text(
+                    d,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  ),
+                ),
+              ))
+          .toList(),
+    );
+  }
+
+  Widget _monthGrid() {
+    final first = DateTime(_displayMonth.year, _displayMonth.month, 1);
+    final firstWeekday = first.weekday % 7;
+    final daysInMonth = DateTime(_displayMonth.year, _displayMonth.month + 1, 0).day;
+    final totalTiles = ((firstWeekday + daysInMonth) / 7).ceil() * 7;
+
+    return GridView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 7,
+        childAspectRatio: 1.0,
+      ),
+      itemCount: totalTiles,
+      physics: const ClampingScrollPhysics(),
+      itemBuilder: (context, index) {
+        final int dayIndex = index - firstWeekday;
+        if (dayIndex < 0 || dayIndex >= daysInMonth) return _emptyTile();
+        final date = DateTime(_displayMonth.year, _displayMonth.month, dayIndex + 1);
+        return _dayTile(date);
+      },
+    );
+  }
+
+  Widget _emptyTile() {
+    return Padding(
+      padding: const EdgeInsets.all(4),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFE8EAEF)),
+        ),
+      ),
+    );
+  }
+
+  Widget _dayTile(DateTime date) {
+    final key = _dateKey(date);
+    final allEvents = _events[key] ?? [];
+    final events = _getFilteredEvents(allEvents);
+    final todayKey = _dateKey(DateTime.now());
+    final isToday = key == todayKey;
+    final hasEvents = events.isNotEmpty;
+    final isSelected = _selectedDate != null && _dateKey(_selectedDate!) == key;
+
+    Color bgColor;
+    Color textColor;
+    Border? border;
+
+    if (isSelected) {
+      bgColor = primary;
+      textColor = Colors.white;
+      border = Border.all(color: primaryDark, width: 1.5);
+    } else if (hasEvents) {
+      bgColor = primary.withOpacity(0.05);
+      textColor = isToday ? primary : Colors.black87;
+      border = Border.all(color: const Color(0xFFE8EAEF));
+    } else if (isToday) {
+      bgColor = primary.withOpacity(0.05);
+      textColor = primary;
+      border = Border.all(color: const Color(0xFFE8EAEF));
+    } else {
+      bgColor = Colors.white;
+      textColor = Colors.black87;
+      border = Border.all(color: const Color(0xFFE8EAEF));
+    }
+
+    final int maxDots = 3;
+    final int dotsToShow = math.min(events.length, maxDots);
+    final int overflow = events.length - dotsToShow;
+
+    return Padding(
+      padding: const EdgeInsets.all(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () {
+          setState(() => _selectedDate = date);
+          if (events.isNotEmpty) {
+            _openDayEvents(date);
+          } else {
+            _showSnack('No events on ${_dateLabel(date)}');
+          }
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(8),
+            border: border,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '${date.day}',
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+              if (hasEvents) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ...List.generate(
+                      dotsToShow,
+                      (i) => Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 1),
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.white : primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    if (overflow > 0)
+                      Container(
+                        margin: const EdgeInsets.only(left: 2),
+                        child: Text(
+                          '+$overflow',
+                          style: TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? Colors.white : primary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== HELPER WIDGETS ====================
+
+class _SmallFAB extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+  final String heroTag;
+
+  const _SmallFAB({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    required this.heroTag,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FloatingActionButton.extended(
+      onPressed: onPressed,
+      heroTag: heroTag,
+      backgroundColor: Colors.white,
+      foregroundColor: _CalendarPageState.primary,
+      elevation: 4,
+      icon: Icon(icon, size: 20),
+      label: Text(
+        label,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _GradientButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final Widget child;
+
+  const _GradientButton({
+    required this.onPressed,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [_CalendarPageState.primary, _CalendarPageState.primaryDark],
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            alignment: Alignment.center,
+            child: DefaultTextStyle(
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _FilterOption({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: SwitchListTile(
+        value: value,
+        onChanged: onChanged,
+        secondary: Icon(icon, color: _CalendarPageState.primary),
+        title: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        activeColor: _CalendarPageState.primary,
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: Colors.grey[600]),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: valueColor ?? Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EventCard extends StatelessWidget {
+  final Event event;
+  final VoidCallback onTap;
+
+  const _EventCard({
+    required this.event,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isCompleted = event.status.toLowerCase().contains('complete');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _CalendarPageState.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  event.source == 'task' ? Icons.task : Icons.event,
+                  color: _CalendarPageState.primary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      event.title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.access_time, size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          DateFormat('h:mm a').format(event.start),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isCompleted
+                                ? Colors.green.withOpacity(0.1)
+                                : Colors.orange.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            event.status,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isCompleted ? Colors.green : Colors.orange,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExportOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ExportOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey[200]!),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _CalendarPageState.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: _CalendarPageState.primary, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
+            ],
+          ),
+        ),
       ),
     );
   }

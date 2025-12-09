@@ -1,10 +1,15 @@
 // lib/user/user_planner.dart
-// Updated: removed top AppBar/title, removed "View Only" pill, removed Tasks/Meetings tab buttons.
-// The 4 stat tiles are now at the very top of the page.
+// Enhanced version with admin design but view-only for users
+// Emerald gradient theme, improved UX, displays tasks and meetings in unified view
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
+
+// Global emerald gradient colors
+const Color themeStart = Color(0xFF10B981); // emerald-500
+const Color themeEnd = Color(0xFF059669); // emerald-600
+const Color accentPurple = Color(0xFF7C3AED);
 
 class Task {
   String id;
@@ -77,7 +82,6 @@ class Meeting {
 
   DateTime? get dateTime => DateTime.tryParse(datetime);
   bool get isUpcoming => dateTime != null && dateTime!.isAfter(DateTime.now());
-  bool get isPast => dateTime != null && dateTime!.isBefore(DateTime.now());
   String get formattedDate {
     if (datetime.isEmpty) return 'No date';
     final d = DateTime.tryParse(datetime);
@@ -93,11 +97,11 @@ class UserPlannerPage extends StatefulWidget {
   State<UserPlannerPage> createState() => _UserPlannerPageState();
 }
 
-class _UserPlannerPageState extends State<UserPlannerPage> {
+class _UserPlannerPageState extends State<UserPlannerPage> with SingleTickerProviderStateMixin {
   final List<Task> tasks = [];
   final List<Meeting> meetings = [];
-  String currentTab = 'tasks'; // left as semantic but tabs removed
-  String currentSubTab = 'all'; // For tasks: 'all', 'pending', 'completed', 'high'
+  String currentTab = 'tasks';
+  String currentSubTab = 'all';
   String search = '';
   late final DateFormat dateFormatter;
 
@@ -105,17 +109,29 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
   bool _isRefreshing = false;
   bool _showMoreTasks = false;
   bool _showMoreMeetings = false;
-  final int _maxVisibleItems = 10;
+  final int _maxVisibleItems = 8;
 
-  static const Color segEmerald = Color(0xFF059669);
-  static const Color emeraldStart = Color(0xFF10B981);
-  static const Color accentPurple = Color(0xFF7C3AED);
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
     dateFormatter = DateFormat.yMMMEd();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) {
+        setState(() {
+          currentTab = _tabController.index == 0 ? 'tasks' : 'meetings';
+        });
+      }
+    });
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -123,28 +139,22 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Load tasks
       final tasksData = await ApiService.getTasks();
-
-      // Load meetings
       final meetingsData = await ApiService.getMeetings();
 
       if (!mounted) return;
 
       setState(() {
-        // Process tasks
         tasks.clear();
         for (var item in tasksData) {
           tasks.add(Task.fromApi(item));
         }
 
-        // Process meetings
         meetings.clear();
         for (var item in meetingsData) {
           meetings.add(Meeting.fromApi(item));
         }
 
-        // Sort meetings by datetime
         meetings.sort((a, b) {
           final da = a.dateTime;
           final db = b.dateTime;
@@ -196,7 +206,12 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
     );
   }
 
@@ -255,7 +270,6 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
       return matches;
     }).toList();
 
-    // Sort by datetime (upcoming first)
     list.sort((a, b) {
       final da = a.dateTime;
       final db = b.dateTime;
@@ -301,91 +315,67 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
     };
   }
 
-  Widget _scaledText(BuildContext ctx, String txt, TextStyle? style, {int maxLines = 1}) {
-    final double original = MediaQuery.of(ctx).textScaleFactor;
-    final double capped = original.clamp(1.0, 1.25);
-    return MediaQuery(
-      data: MediaQuery.of(ctx).copyWith(textScaleFactor: capped),
-      child: Text(
-        txt,
-        maxLines: maxLines,
-        overflow: TextOverflow.ellipsis,
-        softWrap: false,
-        style: style,
-      ),
-    );
-  }
-
-  // -------------------------
-  //   TASK CARD
-  // -------------------------
   Widget _taskCard(Task t) {
     final diff = daysDiff(t.dueDateIso);
     final overdue = diff < 0;
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4EDF9),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Expanded(
-                  child: _scaledText(
-                    context,
+                  child: Text(
                     t.title,
-                    const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                    maxLines: 1,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                   ),
                 ),
                 if (t.completed)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: Colors.green.shade100,
-                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.green.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: _scaledText(
-                      context,
-                      'Completed',
-                      TextStyle(
-                        color: Colors.green.shade800,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, size: 12, color: Colors.green.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Completed',
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
             ),
-            const SizedBox(height: 6),
-            if (t.desc.isNotEmpty)
-              _scaledText(
-                context,
+            if (t.desc.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
                 t.desc,
-                TextStyle(fontSize: 13, color: Colors.grey.shade700),
                 maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
               ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                _chip(t.type, Colors.white),
+                _chip(t.type, const Color(0xFFF0FDF4)),
                 _chip(t.priority, _priorityColor(t.priority)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -393,15 +383,13 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
                     color: overdue ? Colors.red.shade50 : Colors.grey.shade100,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: _scaledText(
-                    context,
+                  child: Text(
                     overdue ? '${diff.abs()}d overdue' : '$diff d left',
-                    TextStyle(
+                    style: TextStyle(
                       color: overdue ? Colors.red.shade700 : Colors.grey.shade800,
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
-                    maxLines: 1,
                   ),
                 ),
               ],
@@ -412,64 +400,54 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
     );
   }
 
-  // -------------------------
-  //   MEETING CARD
-  // -------------------------
   Widget _meetingCard(Meeting m) {
     final isUpcoming = m.isUpcoming;
-    final isPast = m.isPast;
     final isToday = m.dateTime != null &&
         m.dateTime!.year == DateTime.now().year &&
         m.dateTime!.month == DateTime.now().month &&
         m.dateTime!.day == DateTime.now().day;
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F7FF),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Expanded(
-                  child: _scaledText(
-                    context,
+                  child: Text(
                     m.title,
-                    const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                    maxLines: 1,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: isUpcoming ? Colors.blue.shade100 :
-                           isToday ? Colors.orange.shade100 : Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(12),
+                    color: _statusColor(m.status).withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: _scaledText(
-                    context,
-                    isToday ? 'Today' :
-                    isUpcoming ? 'Upcoming' : 'Past',
-                    TextStyle(
-                      color: isUpcoming ? Colors.blue.shade800 :
-                             isToday ? Colors.orange.shade800 : Colors.grey.shade800,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 1,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _statusIcon(m.status),
+                        size: 12,
+                        color: _statusColor(m.status),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        m.status,
+                        style: TextStyle(
+                          color: _statusColor(m.status),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -480,34 +458,23 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
                 Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _scaledText(
-                    context,
+                  child: Text(
                     m.formattedDate,
-                    TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey.shade700,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 1,
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                   ),
                 ),
               ],
             ),
             if (m.location.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   Icon(Icons.location_on, size: 14, color: Colors.grey.shade600),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: _scaledText(
-                      context,
+                    child: Text(
                       m.location,
-                      TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade700,
-                      ),
-                      maxLines: 1,
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                     ),
                   ),
                 ],
@@ -515,45 +482,23 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
             ],
             if (m.purpose.isNotEmpty) ...[
               const SizedBox(height: 8),
-              _scaledText(
-                context,
+              Text(
                 m.purpose,
-                TextStyle(fontSize: 13, color: Colors.grey.shade700),
                 maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                _chip(m.type.isEmpty ? 'Meeting' : m.type, Colors.white),
-                _chip(m.status, _statusColor(m.status)),
-                if (m.attendees.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.purple.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.people, size: 12, color: Colors.purple.shade700),
-                        const SizedBox(width: 4),
-                        _scaledText(
-                          context,
-                          '${m.attendees.length} ${m.attendees.length == 1 ? 'person' : 'people'}',
-                          TextStyle(
-                            color: Colors.purple.shade700,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                        ),
-                      ],
-                    ),
-                  ),
+                if (m.type.isNotEmpty) _chip(m.type, const Color(0xFFF0FDF4)),
+                if (isToday)
+                  _chip('Today', Colors.orange.shade100)
+                else if (isUpcoming)
+                  _chip('Upcoming', Colors.blue.shade100),
               ],
             ),
           ],
@@ -563,26 +508,19 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
   }
 
   Widget _chip(String text, Color bg) {
-    final label = text.isNotEmpty
-        ? (text[0].toUpperCase() + (text.length > 1 ? text.substring(1) : ''))
-        : '';
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 48, maxWidth: 160),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.center,
-          child: _scaledText(
-            context,
-            label,
-            const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-            maxLines: 1,
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: themeStart.withOpacity(0.12)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF065F46),
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -597,91 +535,85 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
   Color _statusColor(String status) {
     switch (status.toLowerCase()) {
       case 'completed':
-      case 'done':
-        return Colors.green.shade100;
+        return Colors.green;
       case 'in progress':
-        return Colors.blue.shade100;
+        return Colors.blue;
       case 'cancelled':
-        return Colors.red.shade100;
+        return Colors.red;
       default:
-        return Colors.grey.shade200;
+        return Colors.orange;
+    }
+  }
+
+  IconData _statusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+        return Icons.check_circle;
+      case 'in progress':
+        return Icons.play_circle;
+      case 'cancelled':
+        return Icons.cancel;
+      default:
+        return Icons.schedule;
     }
   }
 
   Widget _taskSegmentedControl(List<String> tabs) {
-    final mq = MediaQuery.of(context);
-    final double baseFontSize = 13.0;
-    final double fontSize = baseFontSize * (mq.size.width / 375).clamp(0.92, 1.05);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: tabs.map((tab) {
+          final bool active = currentSubTab == tab;
+          final String label = tab[0].toUpperCase() + tab.substring(1);
 
-    return LayoutBuilder(builder: (ctx, constraints) {
-      final int count = tabs.length;
-      final double totalWidth = constraints.maxWidth;
-      final double itemWidth = totalWidth / count;
-
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Row(
-          children: tabs.map((tab) {
-            final bool active = currentSubTab == tab;
-            final String label = tab[0].toUpperCase() + tab.substring(1);
-
-            final double horizontalPadding = (10.0 * (mq.size.width / 375)).clamp(8.0, 14.0);
-            final double verticalPadding = 6.0;
-            final double pillHeight = (fontSize * 2.0).clamp(28.0, 40.0);
-            final BorderRadius pillRadius = BorderRadius.circular(pillHeight / 2);
-
-            return Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => currentSubTab = tab),
+          return Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => currentSubTab = tab),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: active
+                    ? BoxDecoration(
+                        color: themeEnd,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      )
+                    : const BoxDecoration(color: Colors.transparent),
                 child: Center(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: active ? horizontalPadding : 8,
-                      vertical: verticalPadding,
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: active ? Colors.white : Colors.black87,
                     ),
-                    decoration: active
-                        ? BoxDecoration(
-                            color: segEmerald,
-                            borderRadius: pillRadius,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 4,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          )
-                        : const BoxDecoration(color: Colors.transparent),
-                    child: _scaledText(
-                      context,
-                      label,
-                      TextStyle(
-                        fontSize: fontSize,
-                        fontWeight: FontWeight.w600,
-                        color: active ? Colors.white : Colors.black87,
-                      ),
-                      maxLines: 1,
-                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
-            );
-          }).toList(),
-        ),
-      );
-    });
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 
-  Widget _statTile(String label, int value, double height, Color color) {
+  Widget _statTile(String label, int value, Color color) {
     return Container(
-      height: height,
+      height: 82,
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(12),
@@ -693,24 +625,22 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
           ),
         ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: _scaledText(
-              context,
-              label,
-              const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
-              maxLines: 1,
-            ),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white70),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 6),
           Text(
             '$value',
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
               color: Colors.white,
             ),
@@ -732,230 +662,269 @@ class _UserPlannerPageState extends State<UserPlannerPage> {
 
     final taskSubTabs = ['all', 'pending', 'completed', 'high'];
 
-    final mq = MediaQuery.of(context);
-    final double horizontalPad = (18.0 * (mq.size.width / 375)).clamp(12.0, 28.0);
-
     return Scaffold(
-      // AppBar removed so top of screen is content (4 stat tiles will be at the very top)
       backgroundColor: const Color(0xFFF7FBF7),
+      appBar: AppBar(
+        title: const Text('Planner', style: TextStyle(fontWeight: FontWeight.w800)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: (_isLoading || _isRefreshing) ? null : _refreshData,
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2)),
+              ],
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: themeEnd,
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: themeEnd,
+              indicatorWeight: 3,
+              tabs: const [
+                Tab(text: 'Tasks'),
+                Tab(text: 'Meetings'),
+              ],
+            ),
+          ),
+        ),
+      ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _refreshData,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            // top padding set to 0 so tiles are at the very top
-            padding: EdgeInsets.fromLTRB(horizontalPad, 0, horizontalPad, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 8),
-
-                // --- TASKS STAT TILES (these are now at the very top of the page) ---
-                LayoutBuilder(
-                  builder: (ctx, constraints) {
-                    final double screenW = constraints.maxWidth;
-                    final double scale = (screenW / 375).clamp(0.85, 1.25);
-                    final double tileHeight = (72.0 * scale).clamp(60.0, 110.0);
-
-                    final bool singleRow = constraints.maxWidth >= 420;
-                    if (singleRow) {
-                      return Row(
-                        children: [
-                          Expanded(child: _statTile('Pending', taskStats['pending']!, tileHeight, Colors.blue.shade400)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _statTile('Completed', taskStats['completed']!, tileHeight, Colors.green.shade400)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _statTile('High', taskStats['high']!, tileHeight, Colors.red.shade400)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _statTile('Overdue', taskStats['overdue']!, tileHeight, Colors.orange.shade400)),
-                        ],
-                      );
-                    } else {
-                      final double spacing = 10;
-                      final double itemWidth = (constraints.maxWidth - spacing) / 2;
-                      return Wrap(
-                        spacing: spacing,
-                        runSpacing: 10,
-                        children: [
-                          SizedBox(width: itemWidth, child: _statTile('Pending', taskStats['pending']!, tileHeight, Colors.blue.shade400)),
-                          SizedBox(width: itemWidth, child: _statTile('Completed', taskStats['completed']!, tileHeight, Colors.green.shade400)),
-                          SizedBox(width: itemWidth, child: _statTile('High', taskStats['high']!, tileHeight, Colors.red.shade400)),
-                          SizedBox(width: itemWidth, child: _statTile('Overdue', taskStats['overdue']!, tileHeight, Colors.orange.shade400)),
-                        ],
-                      );
-                    }
-                  },
-                ),
-
-                const SizedBox(height: 18),
-
-                // -------------------------
-                //  TASKS SECTION (kept content)
-                // -------------------------
-                _taskSegmentedControl(taskSubTabs),
-                const SizedBox(height: 16),
-
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search tasks...',
-                    prefixIcon: const Icon(Icons.search),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // TASKS TAB
+              SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Task stats
+                    Row(
+                      children: [
+                        Expanded(child: _statTile('Pending', taskStats['pending']!, Colors.blue.shade400)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _statTile('Done', taskStats['completed']!, Colors.green.shade400)),
+                      ],
                     ),
-                  ),
-                  onChanged: (v) => setState(() => search = v),
-                ),
-                const SizedBox(height: 16),
-
-                if (_isLoading)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: CircularProgressIndicator(),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _statTile('High', taskStats['high']!, Colors.red.shade400)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _statTile('Overdue', taskStats['overdue']!, Colors.orange.shade400)),
+                      ],
                     ),
-                  )
-                else if (filteredTasks.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Center(
-                      child: Text(
-                        'No tasks found',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ),
-                  )
-                else
-                  ...visibleTasks.map(_taskCard).toList(),
+                    const SizedBox(height: 18),
 
-                if (filteredTasks.length > _maxVisibleItems)
-                  TextButton(
-                    onPressed: () => setState(() => _showMoreTasks = !_showMoreTasks),
-                    child: Text(
-                      _showMoreTasks
-                          ? 'Show less'
-                          : 'Show more (${filteredTasks.length - _maxVisibleItems} more)',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
+                    // Filter tabs
+                    _taskSegmentedControl(taskSubTabs),
+                    const SizedBox(height: 16),
 
-                const SizedBox(height: 28),
-
-                // -------------------------
-                //  MEETINGS SECTION
-                // -------------------------
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: accentPurple.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: accentPurple.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline, color: accentPurple),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _scaledText(
-                          context,
-                          'View your scheduled meetings. Only admins can create or modify meetings.',
-                          TextStyle(color: accentPurple, fontSize: 13),
-                          maxLines: 2,
+                    // Search
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search tasks...',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                LayoutBuilder(
-                  builder: (ctx, constraints) {
-                    final double screenW = constraints.maxWidth;
-                    final double scale = (screenW / 375).clamp(0.85, 1.25);
-                    final double tileHeight = (72.0 * scale).clamp(60.0, 110.0);
-
-                    final bool singleRow = constraints.maxWidth >= 420;
-                    if (singleRow) {
-                      return Row(
-                        children: [
-                          Expanded(child: _statTile('Total', meetingStats['total']!, tileHeight, accentPurple)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _statTile('Upcoming', meetingStats['upcoming']!, tileHeight, Colors.blue.shade400)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _statTile('Today', meetingStats['today']!, tileHeight, Colors.orange.shade400)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _statTile('Past', meetingStats['past']!, tileHeight, Colors.grey.shade400)),
-                        ],
-                      );
-                    } else {
-                      final double spacing = 10;
-                      final double itemWidth = (constraints.maxWidth - spacing) / 2;
-                      return Wrap(
-                        spacing: spacing,
-                        runSpacing: 10,
-                        children: [
-                          SizedBox(width: itemWidth, child: _statTile('Total', meetingStats['total']!, tileHeight, accentPurple)),
-                          SizedBox(width: itemWidth, child: _statTile('Upcoming', meetingStats['upcoming']!, tileHeight, Colors.blue.shade400)),
-                          SizedBox(width: itemWidth, child: _statTile('Today', meetingStats['today']!, tileHeight, Colors.orange.shade400)),
-                          SizedBox(width: itemWidth, child: _statTile('Past', meetingStats['past']!, tileHeight, Colors.grey.shade400)),
-                        ],
-                      );
-                    }
-                  },
-                ),
-                const SizedBox(height: 20),
-
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search meetings...',
-                    prefixIcon: const Icon(Icons.search),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+                      onChanged: (v) => setState(() => search = v),
                     ),
-                  ),
-                  onChanged: (v) => setState(() => search = v),
-                ),
-                const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                if (_isLoading)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: CircularProgressIndicator(),
-                    ),
-                  )
-                else if (filteredMeetings.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Center(
-                      child: Text(
-                        'No meetings found',
-                        style: TextStyle(color: Colors.grey.shade600),
+                    // View-only info banner
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: themeStart.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: themeStart.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, color: themeStart, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'View-only mode. Contact admin to modify tasks.',
+                              style: TextStyle(color: themeStart, fontSize: 13),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  )
-                else
-                  ...visibleMeetings.map(_meetingCard).toList(),
+                    const SizedBox(height: 16),
 
-                if (filteredMeetings.length > _maxVisibleItems)
-                  TextButton(
-                    onPressed: () => setState(() => _showMoreMeetings = !_showMoreMeetings),
-                    child: Text(
-                      _showMoreMeetings
-                          ? 'Show less'
-                          : 'Show more (${filteredMeetings.length - _maxVisibleItems} more)',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    // Tasks list
+                    if (_isLoading)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else if (filteredTasks.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(Icons.inbox, size: 48, color: Colors.grey.shade300),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No tasks found',
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ...visibleTasks.map(_taskCard).toList(),
+
+                    if (filteredTasks.length > _maxVisibleItems)
+                      Center(
+                        child: TextButton(
+                          onPressed: () => setState(() => _showMoreTasks = !_showMoreTasks),
+                          child: Text(
+                            _showMoreTasks
+                                ? 'Show less'
+                                : 'Show more (${filteredTasks.length - _maxVisibleItems} more)',
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // MEETINGS TAB
+              SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Meeting stats
+                    Row(
+                      children: [
+                        Expanded(child: _statTile('Total', meetingStats['total']!, accentPurple)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _statTile('Upcoming', meetingStats['upcoming']!, Colors.blue.shade400)),
+                      ],
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _statTile('Today', meetingStats['today']!, Colors.orange.shade400)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _statTile('Past', meetingStats['past']!, Colors.grey.shade400)),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
 
-                const SizedBox(height: 40),
-              ],
-            ),
+                    // Search
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search meetings...',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (v) => setState(() => search = v),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // View-only info banner
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: accentPurple.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: accentPurple.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, color: accentPurple, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'View your scheduled meetings. Only admins can modify meetings.',
+                              style: TextStyle(color: accentPurple, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Meetings list
+                    if (_isLoading)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else if (filteredMeetings.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(Icons.event_busy, size: 48, color: Colors.grey.shade300),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No meetings found',
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ...visibleMeetings.map(_meetingCard).toList(),
+
+                    if (filteredMeetings.length > _maxVisibleItems)
+                      Center(
+                        child: TextButton(
+                          onPressed: () => setState(() => _showMoreMeetings = !_showMoreMeetings),
+                          child: Text(
+                            _showMoreMeetings
+                                ? 'Show less'
+                                : 'Show more (${filteredMeetings.length - _maxVisibleItems} more)',
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),

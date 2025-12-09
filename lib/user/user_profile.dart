@@ -1,10 +1,7 @@
 // lib/user/user_profile.dart
-// User Profile Page - colored emerald ring around avatar with a subtle glow.
-// Includes polished profile card, removed academic header, emerald-colored switch,
-// circular close pill in edit sheet, improved edit form layout.
+// Enhanced User Profile with emerald gradient theme and improved design
 
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -55,24 +52,30 @@ class _UserProfilePageState extends State<UserProfilePage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        // Polished sheet with draggable behavior
         return SafeArea(
           child: DraggableScrollableSheet(
-            initialChildSize: 0.72,
-            minChildSize: 0.4,
+            initialChildSize: 0.75,
+            minChildSize: 0.5,
             maxChildSize: 0.95,
             expand: false,
             builder: (context, scrollController) {
               return Container(
                 decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 12,
+                      offset: Offset(0, -6),
+                    ),
+                  ],
                 ),
                 child: Padding(
                   padding: MediaQuery.of(ctx).viewInsets,
                   child: SingleChildScrollView(
                     controller: scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     child: EditForm(
                       title: title,
                       initialData: _getFormInitial(formKey),
@@ -97,11 +100,20 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
       await _repo.save(_data);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved successfully')),
-        );
+        _showSnack('Saved successfully');
       }
     }
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   Map<String, dynamic> _getFormInitial(String key) {
@@ -113,18 +125,25 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Widget _buildChip(String label, String value) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F6FA),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFEBEEF2)),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-          const SizedBox(height: 6),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
         ],
       ),
     );
@@ -133,51 +152,41 @@ class _UserProfilePageState extends State<UserProfilePage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9F7FB),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: emeraldEnd),
+              const SizedBox(height: 16),
+              const Text('Loading profile...', style: TextStyle(color: Colors.grey)),
+            ],
+          ),
+        ),
+      );
     }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9F7FB),
+      appBar: AppBar(
+        title: const Text('Profile', style: TextStyle(fontWeight: FontWeight.w800)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+      ),
       body: SafeArea(
         child: LayoutBuilder(builder: (context, constraints) {
           final gridCols = constraints.maxWidth > 900 ? 3 : (constraints.maxWidth > 600 ? 2 : 1);
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1100),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Header
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              Text('Profile', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-                              SizedBox(height: 6),
-                              Text('Manage your personal information', style: TextStyle(color: Colors.grey)),
-                            ],
-                          ),
-                        ),
-                        _GradientPill(
-                          onPressed: () => _openEditSheet('Edit Profile', 'profile'),
-                          child: Row(
-                            children: const [
-                              Icon(Icons.edit, size: 16),
-                              SizedBox(width: 8),
-                              Text('Edit Profile'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // ---- Profile Card with colored emerald gradient RING + subtle glow ----
+                    // Profile Card with emerald ring
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -185,103 +194,107 @@ class _UserProfilePageState extends State<UserProfilePage> {
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withOpacity(0.06),
-                            blurRadius: 22,
-                            offset: const Offset(0, 10),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
                           ),
                         ],
                       ),
-                      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+                      padding: const EdgeInsets.all(20),
                       child: Row(
                         children: [
-                          // Outer ring implemented using an outer gradient circle and inner white circle to form a ring.
-                          // Added a subtle glow via a soft boxShadow on the outer ring container.
+                          // Avatar with emerald ring
                           Container(
-                            margin: const EdgeInsets.only(right: 14),
-                            width: 92,
-                            height: 92,
-                            alignment: Alignment.center,
-                            child: Container(
-                              width: 92,
-                              height: 92,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: SweepGradient(
-                                  startAngle: 0.0,
-                                  endAngle: 6.283185307179586,
-                                  colors: [
-                                    emeraldStart,
-                                    emeraldEnd,
-                                    emeraldStart,
-                                  ],
-                                ),
-                                // subtle colored glow
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: emeraldEnd.withOpacity(0.18),
-                                    blurRadius: 18,
-                                    spreadRadius: 4,
-                                    offset: const Offset(0, 6),
-                                  ),
-                                  BoxShadow(
-                                    color: emeraldStart.withOpacity(0.06),
-                                    blurRadius: 8,
-                                    spreadRadius: 1,
-                                  ),
-                                ],
+                            width: 88,
+                            height: 88,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const SweepGradient(
+                                colors: [emeraldStart, emeraldEnd, emeraldStart],
                               ),
-                              child: Center(
-                                // inner white circle that creates the ring effect
-                                child: Container(
-                                  width: 68,
-                                  height: 68,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.white,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.06),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                    ],
-                                  ),
-                                  child: CircleAvatar(
-                                    backgroundColor: Colors.white,
-                                    child: _buildAvatar(),
-                                  ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: emeraldEnd.withOpacity(0.2),
+                                  blurRadius: 16,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Container(
+                                width: 72,
+                                height: 72,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white,
+                                ),
+                                child: CircleAvatar(
+                                  backgroundColor: Colors.white,
+                                  child: _buildAvatar(),
                                 ),
                               ),
                             ),
                           ),
+                          const SizedBox(width: 16),
 
-                          // Name & email block
+                          // Name & email
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   getDisplayName(),
-                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
                                 ),
                                 const SizedBox(height: 6),
-                                Text(_data.profile['email'], style: TextStyle(color: Colors.grey[700])),
+                                Text(
+                                  _data.profile['email'],
+                                  style: TextStyle(color: Colors.grey[700], fontSize: 14),
+                                ),
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: emeraldEnd.withOpacity(0.2),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Text(
+                                    _data.profile['status'],
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
 
-                          // intentionally empty (status pill & menu removed)
-                          const SizedBox(width: 4),
+                          // Edit button
+                          _GradientIconButton(
+                            onPressed: () => _openEditSheet('Edit Profile', 'profile'),
+                            icon: Icons.edit,
+                          ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 20),
 
-                    // Academic Info — header removed (no Edit button)
+                    // Academic Info
                     _InfoCard(
-                      title: null, // header removed
+                      title: 'Academic Information',
+                      actionText: 'Edit',
+                      onAction: () => _openEditSheet('Edit Academic Info', 'academic'),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        padding: const EdgeInsets.all(12),
                         child: GridView(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -303,15 +316,15 @@ class _UserProfilePageState extends State<UserProfilePage> {
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 20),
 
-                    // Personal Info (keeps header)
+                    // Personal Info
                     _InfoCard(
                       title: 'Personal Information',
                       actionText: 'Edit',
                       onAction: () => _openEditSheet('Edit Personal Info', 'personal'),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        padding: const EdgeInsets.all(12),
                         child: GridView(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -331,31 +344,23 @@ class _UserProfilePageState extends State<UserProfilePage> {
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 20),
 
                     // Settings
                     _InfoCard(
                       title: 'Account Settings',
                       child: Column(
                         children: [
-                          // Emerald-colored switch that matches the Save/Close buttons
                           SwitchListTile(
                             title: const Text('Email Notifications'),
                             subtitle: const Text('Receive updates about activities'),
                             value: _data.settings['emailNotifications'] ?? true,
-
-                            // Colors to match emerald palette used across the UI
-                            activeColor: emeraldEnd, // thumb
-                            activeTrackColor: emeraldStart.withOpacity(0.45), // track
-
+                            activeColor: emeraldEnd,
+                            activeTrackColor: emeraldStart.withOpacity(0.45),
                             onChanged: (v) async {
                               setState(() => _data.settings['emailNotifications'] = v);
                               await _repo.save(_data);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Notification preference saved')),
-                                );
-                              }
+                              _showSnack('Notification preference saved');
                             },
                           ),
                         ],
@@ -382,14 +387,13 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
     return Text(
       initials.toUpperCase(),
-      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.black87),
+      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.black87),
     );
   }
 }
 
-// ----- Reusable info card: title nullable to allow header removal -----
 class _InfoCard extends StatelessWidget {
-  final String? title; // nullable to allow header removal
+  final String title;
   final Widget child;
   final String? actionText;
   final VoidCallback? onAction;
@@ -408,39 +412,22 @@ class _InfoCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 12, offset: const Offset(0, 6))
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 6))
         ],
       ),
       child: Column(
         children: [
-          // Only render header when title is provided
-          if (title != null)
-            ListTile(
-              title: Text(title!, style: const TextStyle(fontWeight: FontWeight.w700)),
-              trailing: actionText != null
-                  ? TextButton(
-                      onPressed: onAction,
-                      style: TextButton.styleFrom(foregroundColor: emeraldStart),
-                      child: Text(actionText!),
-                    )
-                  : null,
-            ),
-          if (title != null) const Divider(height: 0),
-          // If title is null but actionText != null (our academic case), place Edit at top-right
-          if (title == null && actionText != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12.0, right: 12.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
+          ListTile(
+            title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            trailing: actionText != null
+                ? TextButton(
                     onPressed: onAction,
                     style: TextButton.styleFrom(foregroundColor: emeraldStart),
                     child: Text(actionText!),
-                  ),
-                ],
-              ),
-            ),
+                  )
+                : null,
+          ),
+          const Divider(height: 0),
           child,
         ],
       ),
@@ -527,7 +514,6 @@ class ProfileRepository {
   }
 }
 
-// ----- Edit Form (improved layout + input styling) -----
 class EditForm extends StatefulWidget {
   final String title;
   final Map<String, dynamic> initialData;
@@ -595,80 +581,74 @@ class _EditFormState extends State<EditForm> {
     return labels[id] ?? id;
   }
 
-  InputDecoration _fieldDecoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      filled: true,
-      fillColor: const Color(0xFFF6F6FA),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
-      ),
-      labelStyle: const TextStyle(fontWeight: FontWeight.w600),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Make a responsive two-column layout inside the sheet.
-    final width = MediaQuery.of(context).size.width;
-    final cols = width > 800 ? 2 : 1;
     final entries = _controllers.entries.toList();
-
-    List<Widget> fields = entries.map((e) {
-      final label = _labelFromId(e.key);
-      return TextFormField(
-        controller: e.value,
-        decoration: _fieldDecoration(label),
-        validator: (v) {
-          if (e.key == 'email') {
-            if (v == null || v.trim().isEmpty) return 'Email required';
-            if (!v.contains('@')) return 'Enter a valid email';
-          }
-          if ((e.key == 'firstName' || e.key == 'lastName') && (v == null || v.trim().isEmpty)) {
-            return 'Required';
-          }
-          return null;
-        },
-      );
-    }).toList();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Header row with small circular close pill
         Row(
           children: [
-            Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
-            // Circular close button
+            Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
             _SmallCircularClose(onPressed: () => Navigator.of(context).pop()),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Form(
           key: _form,
-          child: LayoutBuilder(builder: (context, box) {
-            final double spacing = 12;
-            final itemWidth = (box.maxWidth - spacing * (cols - 1)) / cols;
-            return Wrap(
-              runSpacing: 12,
-              spacing: spacing,
-              children: fields.map((w) {
-                final widthValue = itemWidth.clamp(280.0, box.maxWidth).toDouble();
-                return SizedBox(width: widthValue, child: w);
-              }).toList(),
-            );
-          }),
+          child: Column(
+            children: entries.map((e) {
+              final label = _labelFromId(e.key);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: TextFormField(
+                  controller: e.value,
+                  decoration: InputDecoration(
+                    labelText: label,
+                    filled: true,
+                    fillColor: const Color(0xFFF6F6FA),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  validator: (v) {
+                    if (e.key == 'email' && (v == null || !v.contains('@'))) {
+                      return 'Valid email required';
+                    }
+                    if ((e.key == 'firstName' || e.key == 'lastName') && (v == null || v.trim().isEmpty)) {
+                      return 'Required';
+                    }
+                    return null;
+                  },
+                ),
+              );
+            }).toList(),
+          ),
         ),
-        const SizedBox(height: 18),
-        // Action buttons
+        const SizedBox(height: 20),
         Row(
           children: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-            const Spacer(),
-            _GradientPill(onPressed: _save, child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('Save', style: TextStyle(fontSize: 15)))),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Cancel'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _GradientButton(
+                onPressed: _save,
+                child: const Text('Save', style: TextStyle(fontSize: 16)),
+              ),
+            ),
           ],
         ),
       ],
@@ -676,56 +656,84 @@ class _EditFormState extends State<EditForm> {
   }
 }
 
-/// Perfect circular close button for the edit-sheet header
 class _SmallCircularClose extends StatelessWidget {
   final VoidCallback onPressed;
   const _SmallCircularClose({required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      shape: const CircleBorder(),
-      color: Colors.transparent,
-      child: Ink(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
-          shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.14), blurRadius: 6, offset: const Offset(0, 3))],
-        ),
-        child: InkWell(
-          onTap: onPressed,
-          customBorder: const CircleBorder(),
-          child: const Center(child: Icon(Icons.close, size: 18, color: Colors.white)),
-        ),
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(colors: [emeraldStart, emeraldEnd]),
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        icon: const Icon(Icons.close, size: 20, color: Colors.white),
+        onPressed: onPressed,
       ),
     );
   }
 }
 
-class _GradientPill extends StatelessWidget {
+class _GradientIconButton extends StatelessWidget {
   final VoidCallback onPressed;
-  final Widget child;
+  final IconData icon;
 
-  const _GradientPill({required this.onPressed, required this.child});
+  const _GradientIconButton({required this.onPressed, required this.icon});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Ink(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: [BoxShadow(color: emeraldEnd.withOpacity(0.16), blurRadius: 8, offset: const Offset(0, 4))],
-        ),
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: emeraldEnd.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: Colors.white, size: 20),
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
+class _GradientButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final Widget child;
+
+  const _GradientButton({required this.onPressed, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 50,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [emeraldStart, emeraldEnd]),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(color: emeraldEnd.withOpacity(0.25), blurRadius: 10, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
         child: InkWell(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(28),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: DefaultTextStyle(style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700), child: child),
+          borderRadius: BorderRadius.circular(12),
+          child: Center(
+            child: DefaultTextStyle(
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+              child: child,
+            ),
           ),
         ),
       ),
